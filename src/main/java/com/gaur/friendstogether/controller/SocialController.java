@@ -63,4 +63,92 @@ public class SocialController {
         log.info("Friend request success: {}", response);
         return ResponseEntity.ok(response);
     }
+
+    // ===================
+    // GET: My Pending Friend Requests (Inbox)
+    // ===================
+    @GetMapping("/requests/pending")
+    public ResponseEntity<?> getPendingRequests(@AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) return ResponseEntity.status(401).body("Unauthorized");
+
+        log.info("Fetching pending requests for user: {}", userDetails.getUsername());
+        return ResponseEntity.ok(socialService.getPendingRequests(userDetails.getUsername()));
+    }
+
+    // ===================
+    // PUT: Accept Friend Request
+    // ===================
+    @PutMapping("/accept-request/{senderUserId}")
+    public ResponseEntity<String> acceptRequest(
+            @PathVariable String senderUserId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        if (userDetails == null) return ResponseEntity.status(401).body("Unauthorized");
+
+        log.info("Accepting friend request from: {} by: {}", senderUserId, userDetails.getUsername());
+        String response = socialService.acceptFriendRequest(senderUserId, userDetails.getUsername());
+
+        if (response.startsWith("Error")) {
+            return ResponseEntity.badRequest().body(response);
+        }
+        return ResponseEntity.ok(response);
+    }
+
+    // ===================
+    // DELETE: Cancel Sent Request
+    // ===================
+    @DeleteMapping("/cancel-request/{userId}")
+    public ResponseEntity<String> cancelRequest(
+            @PathVariable String userId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        log.info("Cancel request for: {} by: {}", userId, userDetails.getUsername());
+        String response = socialService.cancelFriendRequest(userId, userDetails.getUsername());
+
+        if (response.startsWith("Error")) return ResponseEntity.badRequest().body(response);
+        return ResponseEntity.ok(response);
+    }
+
+    // ===================
+    // DELETE: Reject Incoming Request
+    // ===================
+    @DeleteMapping("/reject-request/{senderUserId}")
+    public ResponseEntity<String> rejectRequest(
+            @PathVariable String senderUserId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        log.info("Reject request from: {} by: {}", senderUserId, userDetails.getUsername());
+        String response = socialService.rejectFriendRequest(senderUserId, userDetails.getUsername());
+
+        if (response.startsWith("Error")) return ResponseEntity.badRequest().body(response);
+        return ResponseEntity.ok(response);
+    }
+
+    // ===================
+    // GET: My Friends List
+    // ===================
+    @GetMapping("/friends")
+    public ResponseEntity<?> getFriendsList(@AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) return ResponseEntity.status(401).body("Unauthorized");
+
+        log.info("Fetching friends list for: {}", userDetails.getUsername());
+        return ResponseEntity.ok(socialService.getMyFriends(userDetails.getUsername()));
+    }
+
+    // ===================
+    // DELETE: Unfriend a user
+    // ===================
+    @DeleteMapping("/unfriend/{friendUserId}")
+    public ResponseEntity<String> unfriendUser(
+            @PathVariable String friendUserId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        log.info("Unfriend request for: {} by: {}", friendUserId, userDetails.getUsername());
+        String response = socialService.unfriend(friendUserId, userDetails.getUsername());
+
+        if (response.startsWith("Error")) return ResponseEntity.badRequest().body(response);
+        return ResponseEntity.ok(response);
+    }
+
+
 }

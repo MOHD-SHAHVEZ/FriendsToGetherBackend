@@ -11,4 +11,5 @@ public class SocialUserResponse {
     private String avatarUrl;
     private int level;
     private String status; // "STRANGER", "PENDING", "FRIENDS", "SELF"
+    private Long friendsCount;
 }

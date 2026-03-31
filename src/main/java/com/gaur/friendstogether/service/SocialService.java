@@ -11,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -37,6 +39,9 @@ public class SocialService {
                     log.error("Target user not found for userId: {}", targetUserId);
                     return new RuntimeException("User with ID " + targetUserId + " not found");
                 });
+
+        // --- [FRIENDS COUNT CHANGE]: Target user ke friends ki ginti nikalna ---
+        long totalFriends = friendshipRepository.countAcceptedFriends(targetUser);
 
         // 3. Status decide karo
         String friendshipStatus = "STRANGER";
@@ -66,6 +71,7 @@ public class SocialService {
                 .avatarUrl(targetUser.getProfile().getAvatarUrl())
                 .level(targetUser.getProfile().getLevel())
                 .status(friendshipStatus)
+                .friendsCount(totalFriends) // --- [FRIENDS COUNT CHANGE]: Response mein set kar dena ---
                 .build();
     }
 
@@ -113,6 +119,141 @@ public class SocialService {
         friendshipRepository.save(friendship);
         log.info("Successfully sent friend request from {} to {}", currentUserEmail, targetUserId);
         return "Friend request sent successfully!";
+    }
+
+    // ===========================
+    // Request Pending & Accept
+    // ===========================
+
+    // 1. Pending Requests nikalne ke liye
+    public List<SocialUserResponse> getPendingRequests(String currentUserEmail) {
+        User currentUser = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Hamari FriendshipRepository ka use karke sirf PENDING status wali requests nikalna
+        return friendshipRepository.findByReceiverAndStatus(currentUser, FriendshipStatus.PENDING)
+                .stream()
+                .map(friendship -> {
+                    User sender = friendship.getSender();
+                    return SocialUserResponse.builder()
+                            .userId(sender.getUserId())
+                            .nickname(sender.getProfile().getNickname())
+                            .avatarUrl(sender.getProfile().getAvatarUrl())
+                            .level(sender.getProfile().getLevel())
+                            .status("PENDING_RECEIVED")
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    // ===============================
+    // 2. Request Accept karne ke liye
+    // ===============================
+    @Transactional
+    public String acceptFriendRequest(String senderUserId, String currentUserEmail) {
+        User receiver = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("Receiver not found"));
+
+        User sender = userRepository.findByUserId(senderUserId)
+                .orElseThrow(() -> new RuntimeException("Sender not found"));
+
+        // Check karo ki aisi koi pending request exist karti hai ya nahi
+        Friendship friendship = friendshipRepository.findBySenderAndReceiver(sender, receiver)
+                .orElseThrow(() -> new RuntimeException("Error: No pending request found from this user."));
+
+        if (friendship.getStatus() != FriendshipStatus.PENDING) {
+            return "Error: Request is already " + friendship.getStatus();
+        }
+
+        // Status UPDATE: PENDING -> ACCEPTED
+        friendship.setStatus(FriendshipStatus.ACCEPTED);
+        friendshipRepository.save(friendship);
+
+        return "Success: You are now friends with " + sender.getProfile().getNickname();
+    }
+
+    // ============================================
+    // 1. Apni bheji hui request wapas lena (Cancel)
+    // ============================================
+    @Transactional
+    public String cancelFriendRequest(String targetUserId, String currentUserEmail) {
+        User sender = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("Sender not found"));
+        User receiver = userRepository.findByUserId(targetUserId)
+                .orElseThrow(() -> new RuntimeException("Receiver not found"));
+
+        Friendship friendship = friendshipRepository.findBySenderAndReceiver(sender, receiver)
+                .orElseThrow(() -> new RuntimeException("Error: No pending request found to cancel."));
+
+        if (friendship.getStatus() != FriendshipStatus.PENDING) {
+            return "Error: Cannot cancel a request that is already " + friendship.getStatus();
+        }
+
+        friendshipRepository.delete(friendship);
+        return "Friend request cancelled successfully!";
+    }
+
+    // 2. Aayi hui request ko thukrana (Reject)
+    @Transactional
+    public String rejectFriendRequest(String senderUserId, String currentUserEmail) {
+        User receiver = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("Receiver not found"));
+        User sender = userRepository.findByUserId(senderUserId)
+                .orElseThrow(() -> new RuntimeException("Sender not found"));
+
+        Friendship friendship = friendshipRepository.findBySenderAndReceiver(sender, receiver)
+                .orElseThrow(() -> new RuntimeException("Error: No pending request found to reject."));
+
+        // Reject mein hum ya toh status badalte hain ya delete kar dete hain.
+        // Delete karna best hai taaki user firse request bhej sake baad mein.
+        friendshipRepository.delete(friendship);
+        return "Friend request rejected.";
+    }
+
+    // ==========================================
+    // Fetch list of my All Friends
+    // 1. Mere saare Friends ki list nikalna
+    // ==========================================
+    public List<SocialUserResponse> getMyFriends(String currentUserEmail) {
+        User currentUser = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        List<Friendship> friendships = friendshipRepository.findAllAcceptedFriends(currentUser);
+
+        return friendships.stream().map(f -> {
+            // Agar main sender hoon, toh friend receiver hai. Agar main receiver hoon, toh friend sender hai.
+            User friend = f.getSender().equals(currentUser) ? f.getReceiver() : f.getSender();
+
+            return SocialUserResponse.builder()
+                    .userId(friend.getUserId())
+                    .nickname(friend.getProfile().getNickname())
+                    .avatarUrl(friend.getProfile().getAvatarUrl())
+                    .level(friend.getProfile().getLevel())
+                    .status("FRIENDS")
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
+    // ==================================
+    // 2. Unfriend karna (Dosti khatam)
+    // ==================================
+    @Transactional
+    public String unfriend(String friendUserId, String currentUserEmail) {
+        User currentUser = userRepository.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        User friend = userRepository.findByUserId(friendUserId)
+                .orElseThrow(() -> new RuntimeException("Friend not found"));
+
+        // Dono taraf se check karna padega (A to B ya B to A)
+        Optional<Friendship> friendship = friendshipRepository.findBySenderAndReceiver(currentUser, friend)
+                .or(() -> friendshipRepository.findBySenderAndReceiver(friend, currentUser));
+
+        if (friendship.isPresent() && friendship.get().getStatus() == FriendshipStatus.ACCEPTED) {
+            friendshipRepository.delete(friendship.get());
+            return "Unfriended successfully.";
+        }
+
+        return "Error: You are not friends with this user.";
     }
 
 }
