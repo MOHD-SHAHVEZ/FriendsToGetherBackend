@@ -41,6 +41,19 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+<!--     primary dependency hai jo WebSocket, STOMP, aur Message Broker ki saari functionality provide karegi.   -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+<!--        @Depricated ==> ya ab starter-websocket ka sath include hokar aati hai newly springboot version ma-->
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.boot</groupId>-->
+<!--            <artifactId>spring-boot-starter-messaging</artifactId>-->
+<!--            <version>4.0.5</version>-->
+<!--        </dependency>-->
+
 <!--        AUTHENTICATION & JWT TOKEN DEPENDANCY START HERE-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -81,16 +94,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
         <dependency>
