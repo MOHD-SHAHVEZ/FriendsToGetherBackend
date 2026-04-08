@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FriendsTogether Split-Screen Chat Tester</title>
+    <!-- Include STOMP.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+        h1 { text-align: center; color: #1a1a1a; margin-bottom: 30px; }
+        
+        .split-container { display: flex; gap: 30px; max-width: 1400px; margin: 0 auto; }
+        
+        .chat-panel { flex: 1; background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; display: flex; flex-direction: column; }
+        
+        .panel-header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; color: #555; font-size: 14px; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        
+        button { padding: 10px 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; color: white; transition: 0.2s; width: 100%; margin-top: 5px; }
+        .btn-connect { background: #4CAF50; }
+        .btn-connect:hover { background: #45a049; }
+        .btn-disconnect { background: #f44336; display: none; }
+        .btn-send { background: #2196F3; margin-top: 10px;}
+        .btn-send:hover { background: #1976d2; }
+
+        .status { text-align: center; font-weight: bold; padding: 8px; border-radius: 6px; margin-bottom: 15px; }
+        .offline { background: #ffebee; color: #c62828; }
+        .online { background: #e8f5e9; color: #2e7d32; }
+
+        .chat-window { flex-grow: 1; min-height: 300px; border: 1px solid #ddd; background: #e5ddd5; border-radius: 8px; padding: 15px; overflow-y: auto; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .msg-bubble { max-width: 80%; padding: 10px 15px; border-radius: 15px; font-size: 14px; line-height: 1.4; position: relative; }
+        .msg-sent { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg-received { background: white; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .msg-system { background: rgba(0,0,0,0.5); color: white; align-self: center; font-size: 12px; padding: 5px 12px; border-radius: 10px; }
+        
+        .sender-name { font-size: 11px; font-weight: bold; color: #128C7E; margin-bottom: 3px; }
+        .msg-time { font-size: 10px; color: #888; text-align: right; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+    <h1>🚀 Split-Screen Chat Tester</h1>
+
+    <div class="split-container">
+        
+        <!-- ======================= USER 1 PANEL ======================= -->
+        <div class="chat-panel" style="border-top: 5px solid #2196F3;">
+            <div class="panel-header">
+                <h2 style="margin: 0; color: #2196F3;">👤 User 1 (Left Side)</h2>
+            </div>
+            
+            <div id="status1" class="status offline">STATUS: DISCONNECTED 🔴</div>
+            
+            <div class="form-group" id="authBox1">
+                <label>User 1 JWT Token:</label>
+                <textarea id="token1" rows="3" placeholder="Paste Token here..."></textarea>
+                <label style="margin-top: 10px;">My User ID (Apna ID dalo):</label>
+                <input type="text" id="myId1" placeholder="e.g. 885286914">
+                <button id="btnConnect1" class="btn-connect" onclick="connectUser(1)">CONNECT USER 1</button>
+            </div>
+            <button id="btnDisconnect1" class="btn-disconnect" onclick="disconnectUser(1)">DISCONNECT</button>
+
+            <!-- LOAD HISTORY BUTTON -->
+            <button id="btnHistory1" style="background:#673AB7; display:none; margin-bottom:10px;" onclick="loadHistory(1)">Load Offline Chat History</button>
+
+            <!-- CHAT SCREEN -->
+            <div id="chatWindow1" class="chat-window">
+                <div class="msg-system">Server logs will appear here</div>
+            </div>
+
+            <!-- SEND CONTROLS -->
+            <div class="form-group">
+                <label>Receiver ID (Samne wale ka ID dalo):</label>
+                <input type="text" id="targetId1" placeholder="e.g. 739460929">
+            </div>
+            <div class="form-group" style="display: flex; gap: 10px;">
+                <input type="text" id="msgInput1" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendMessage(1)">
+                <button class="btn-send" style="width: auto; margin:0;" onclick="sendMessage(1)">SEND</button>
+            </div>
+        </div>
+
+
+        <!-- ======================= USER 2 PANEL ======================= -->
+        <div class="chat-panel" style="border-top: 5px solid #FF9800;">
+            <div class="panel-header">
+                <h2 style="margin: 0; color: #FF9800;">👤 User 2 (Right Side)</h2>
+            </div>
+            
+            <div id="status2" class="status offline">STATUS: DISCONNECTED 🔴</div>
+            
+            <div class="form-group" id="authBox2">
+                <label>User 2 JWT Token:</label>
+                <textarea id="token2" rows="3" placeholder="Paste Token here..."></textarea>
+                <label style="margin-top: 10px;">My User ID (Apna ID dalo):</label>
+                <input type="text" id="myId2" placeholder="e.g. 739460929">
+                <button id="btnConnect2" class="btn-connect" onclick="connectUser(2)">CONNECT USER 2</button>
+            </div>
+            <button id="btnDisconnect2" class="btn-disconnect" onclick="disconnectUser(2)">DISCONNECT</button>
+
+            <!-- LOAD HISTORY BUTTON -->
+            <button id="btnHistory2" style="background:#673AB7; display:none; margin-bottom:10px;" onclick="loadHistory(2)">Load Offline Chat History</button>
+
+            <!-- CHAT SCREEN -->
+            <div id="chatWindow2" class="chat-window">
+                <div class="msg-system">Server logs will appear here</div>
+            </div>
+
+            <!-- SEND CONTROLS -->
+            <div class="form-group">
+                <label>Receiver ID (Samne wale ka ID dalo):</label>
+                <input type="text" id="targetId2" placeholder="e.g. 885286914">
+            </div>
+            <div class="form-group" style="display: flex; gap: 10px;">
+                <input type="text" id="msgInput2" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendMessage(2)">
+                <button class="btn-send" style="width: auto; margin:0; background: #FF9800" onclick="sendMessage(2)">SEND</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Array to hold both clients. Index 0 is ignored for easier 1-to-1 mapping with UI
+        const clients = [null, null, null]; 
+
+        function appendUI(userNum, type, content, senderName = "") {
+            const window = document.getElementById('chatWindow' + userNum);
+            const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            
+            let html = '';
+            if (type === 'system') {
+                html = `<div class="msg-system">${content}</div>`;
+            } else if (type === 'sent') {
+                html = `
+                    <div class="msg-bubble msg-sent">
+                        <div>${content}</div>
+                        <div class="msg-time">${time} ✅</div>
+                    </div>`;
+            } else if (type === 'received') {
+                html = `
+                    <div class="msg-bubble msg-received">
+                        <div class="sender-name">${senderName}</div>
+                        <div>${content}</div>
+                        <div class="msg-time">${time}</div>
+                    </div>`;
+            }
+            
+            window.innerHTML += html;
+            window.scrollTop = window.scrollHeight;
+        }
+
+        async function loadHistory(userNum) {
+            let token = document.getElementById('token' + userNum).value.trim();
+            if (token.startsWith("Bearer ")) { token = token.substring(7); }
+            
+            const receiverId = document.getElementById('targetId' + userNum).value.trim();
+            const myId = document.getElementById('myId' + userNum).value.trim();
+            
+            if (!receiverId) {
+                alert("Please enter Receiver ID first to fetch history!");
+                return;
+            }
+
+            appendUI(userNum, 'system', 'Fetching offline chat history...');
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/chat/history/' + receiverId, {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+
+                if (response.ok) {
+                    const messages = await response.json();
+                    if (messages.length === 0) {
+                        appendUI(userNum, 'system', 'No previous history found.');
+                        return;
+                    }
+
+                    // Render them
+                    messages.forEach(msg => {
+                        // Agar sender ka ID mere ID ke barabar hai, toh sent message
+                        if (msg.sender.userId === myId) {
+                            appendUI(userNum, 'sent', msg.content);
+                        } else {
+                            // Nahi toh received message
+                            appendUI(userNum, 'received', msg.content, msg.sender.username || msg.sender.email);
+                        }
+                    });
+                    appendUI(userNum, 'system', 'History loaded successfully!');
+                } else {
+                    appendUI(userNum, 'system', 'Failed to fetch history (Status ' + response.status + ')');
+                }
+            } catch (err) {
+                appendUI(userNum, 'system', 'Error fetching history: ' + err.message);
+            }
+        }
+
+        function updateConnectionUI(userNum, isConnected) {
+            const statusDiv = document.getElementById('status' + userNum);
+            const authBox = document.getElementById('authBox' + userNum);
+            const btnDis = document.getElementById('btnDisconnect' + userNum);
+            const btnHis = document.getElementById('btnHistory' + userNum);
+
+            if (isConnected) {
+                statusDiv.innerText = "STATUS: CONNECTED 🟢";
+                statusDiv.className = "status online";
+                authBox.style.display = 'none';
+                btnDis.style.display = 'block';
+                btnHis.style.display = 'block';
+            } else {
+                statusDiv.innerText = "STATUS: DISCONNECTED 🔴";
+                statusDiv.className = "status offline";
+                authBox.style.display = 'block';
+                btnDis.style.display = 'none';
+                btnHis.style.display = 'none';
+            }
+        }
+
+        function connectUser(userNum) {
+            let token = document.getElementById('token' + userNum).value.trim();
+            let myId = document.getElementById('myId' + userNum).value.trim();
+
+            if (!token) { alert("Please enter JWT Token for User " + userNum); return; }
+            if (!myId) { alert("Please enter Your Own ID (My ID) for User " + userNum); return; }
+            
+            if (token.startsWith("Bearer ")) { token = token.substring(7); }
+
+            appendUI(userNum, 'system', 'Connecting...');
+
+            const stompClient = new StompJs.Client({
+                brokerURL: 'ws://localhost:8080/ws',
+                connectHeaders: { 'Authorization': 'Bearer ' + token },
+                reconnectDelay: 0,
+                heartbeatIncoming: 10000,
+                heartbeatOutgoing: 10000,
+            });
+
+            stompClient.onConnect = function (frame) {
+                updateConnectionUI(userNum, true);
+                appendUI(userNum, 'system', 'Connected Successfully!');
+                
+                // SUBSCRIBE TO DIRECT QUEUE (Bypasses Spring User Registry bugs)
+                const destination = '/queue/chat-' + myId;
+                stompClient.subscribe(destination, function (messageOutput) {
+                    const receivedMsg = JSON.parse(messageOutput.body);
+                    appendUI(userNum, 'received', receivedMsg.content, receivedMsg.sender.username || receivedMsg.sender.email);
+                });
+                appendUI(userNum, 'system', 'Listening on: ' + destination);
+            };
+
+            stompClient.onStompError = function (frame) {
+                appendUI(userNum, 'system', '❌ Error: ' + frame.headers['message']);
+            };
+
+            stompClient.onWebSocketClose = function () {
+                updateConnectionUI(userNum, false);
+                appendUI(userNum, 'system', 'Disconnected by server.');
+            };
+
+            stompClient.activate();
+            clients[userNum] = stompClient;
+        }
+
+        function disconnectUser(userNum) {
+            if (clients[userNum] !== null) {
+                clients[userNum].deactivate();
+                clients[userNum] = null;
+            }
+            updateConnectionUI(userNum, false);
+            appendUI(userNum, 'system', 'Manual Disconnect.');
+        }
+
+        function sendMessage(userNum) {
+            const client = clients[userNum];
+            if (!client || !client.connected) {
+                alert("User " + userNum + " is not connected!");
+                return;
+            }
+
+            const receiverId = document.getElementById('targetId' + userNum).value.trim();
+            const contentInput = document.getElementById('msgInput' + userNum);
+            const content = contentInput.value.trim();
+
+            if (!receiverId || !content) {
+                alert("Target ID aur Message dono zaroori hain!");
+                return;
+            }
+
+            const chatRequest = {
+                receiverId: receiverId,
+                content: content,
+                type: "TEXT"
+            };
+
+            client.publish({
+                destination: '/app/chat.sendMessage',
+                body: JSON.stringify(chatRequest)
+            });
+
+            // Display on own screen
+            appendUI(userNum, 'sent', content);
+            contentInput.value = ''; // Clear input
+        }
+    </script>
+</body>
+</html>
