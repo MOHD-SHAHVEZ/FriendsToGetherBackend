@@ -105,6 +105,8 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
             log.info("📥 [WS-SUBSCRIBE] User: {} subscribed to: {}", user, destination);
         }
 
-        return message;
+        // ★ YEH SECOND SABSE ZAROORI LINE HAI ★
+        // Always rebuild the message using the accessor headers to ensure that our setUser() call is persisted
+        return org.springframework.messaging.support.MessageBuilder.createMessage(message.getPayload(), accessor.getMessageHeaders());
     }
 }

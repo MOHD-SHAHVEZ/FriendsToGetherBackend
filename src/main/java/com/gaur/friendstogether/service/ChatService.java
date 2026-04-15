@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import java.time.LocalDateTime;
 
 @Service
@@ -20,9 +21,11 @@ public class ChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final ChatRoomRepository chatRoomRepository;
     private final UserRepository userRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Transactional
     public ChatMessageResponse saveMessage(ChatRequest request, String senderEmail) {
+
         log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         log.info("💾 [CHAT-SVC] saveMessage() START — senderEmail: {}, receiverId: {}",
                 senderEmail, request.getReceiverId());
@@ -36,6 +39,13 @@ public class ChatService {
                 });
         log.info("✅ [CHAT-SVC] Sender mila: {} (userId: {})", sender.getEmail(), sender.getUserId());
 
+        //=======================================================================
+        // Sender khud ko message nahi bhaj sakta receiver Id sender id se aalag honi chiaya tab kaam karo.
+        if (sender.getUserId().equals(request.getReceiverId())) {
+            throw new RuntimeException("Bhai, khud ko message nahi bhej sakte!");
+        }
+        //=======================================================================
+
         // 2. Receiver Find Karo
         log.info("🔍 [CHAT-SVC] Database mein Receiver dhoondh rahe hain: {}", request.getReceiverId());
         User receiver = userRepository.findByUserId(request.getReceiverId())
@@ -43,6 +53,8 @@ public class ChatService {
                     log.error("❌ [CHAT-SVC] Receiver NAHI MILA database mein! UserId: {}", request.getReceiverId());
                     return new RuntimeException("Receiver not found with userId: " + request.getReceiverId());
                 });
+        log.info("Receiver Email (DB): {}", receiver.getEmail());
+        log.info("Active Principal (target): {}", receiver.getEmail());
         log.info("✅ [CHAT-SVC] Receiver mila: {} (userId: {})", receiver.getEmail(), receiver.getUserId());
 
         // 3. Room ID Generate Karo
@@ -109,6 +121,22 @@ public class ChatService {
                         .email(receiver.getEmail())
                         .build())
                 .build();
+
+        // 7. BROADCAST via User Destination (1-to-1 WhatsApp style)
+        // Spring internally translates this to /user/{receiverEmail}/queue/messages
+        log.info("📡 [CHAT-SVC] Private message routing to Receiver: {} on /queue/messages", receiver.getEmail());
+        messagingTemplate.convertAndSendToUser(
+                receiver.getEmail(), 
+                "/queue/messages", 
+                responseDto
+        );
+
+        // 2. Sender ko bhi bhejo (VERY IMPORTANT)
+        messagingTemplate.convertAndSendToUser(
+                sender.getEmail(),
+                "/queue/messages",
+                responseDto
+        );
 
         log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         return responseDto;

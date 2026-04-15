@@ -37,27 +37,15 @@ public class ChatController {
 
         // 2. Sender ka email nikalna (authenticated user)
         String senderEmail = principal.getName();
-        log.info("👤 [CHAT-CTRL] Sender identified: {}", senderEmail);
-        log.info("📨 [CHAT-CTRL] Receiver ID: {}", chatRequest.getReceiverId());
+        log.info("👤 [CHAT-CTRL] Sender Principal Identity: '{}'", senderEmail);
+        log.info("📨 [CHAT-CTRL] Intended Receiver ID: {}", chatRequest.getReceiverId());
 
         // 3. Message ko Database mein save karna via Service
         log.info("💾 [CHAT-CTRL] ChatService.saveMessage() call ho raha hai...");
         com.gaur.friendstogether.dto.response.ChatMessageResponse savedMsgDto = chatService.saveMessage(chatRequest, senderEmail);
         log.info("✅ [CHAT-CTRL] Message saved successfully in DB, DTO prepared.");
 
-        // 4. Real-time Delivery: Direct Queue Routing (Bypassing Spring's Buggy User Registry)
-        // Spring ki 'convertAndSendToUser' kabhi-kabhi STOMP sessions ko correctly map nahi karti
-        // isliye hum direct unki specific ID path par broadcast karenge.
-        String receiverUserId = savedMsgDto.getReceiver().getUserId();
-        String destination = "/queue/chat-" + receiverUserId;
-        log.info("📡 [CHAT-CTRL] Direct delivery shuru — Destination: {}", destination);
-
-        messagingTemplate.convertAndSend(
-                destination,
-                savedMsgDto
-        );
-
-        log.info("✅ [CHAT-CTRL] Message DELIVERED to destination: {}", destination);
+        log.info("✅ [CHAT-CTRL] Message processed successfully and handled by Service.");
         log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
 }

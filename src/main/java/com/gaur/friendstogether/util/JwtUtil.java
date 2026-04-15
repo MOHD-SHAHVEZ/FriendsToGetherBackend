@@ -11,8 +11,9 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    // Naye version mein SecretKey aise generate hoti hai
-    private final SecretKey key = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+    // Fixed static key so tokens don't become invalid on server restart
+    private final String secretString = "FriendsTogetherSuperSecretKey1234567890FriendsTogetherSuperSecretKey";
+    private final SecretKey key = Keys.hmacShaKeyFor(secretString.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     private final int expirationMs = 86400000; // 24 Hours
 
     public String generateToken(String email) {

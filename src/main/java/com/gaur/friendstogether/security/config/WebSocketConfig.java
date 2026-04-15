@@ -35,7 +35,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
         // --- [OUTGOING]: Server yahan se clients ko data push karega ---
         // '/topic' for Groups, '/queue' for 1-on-1 private chat
-        registry.enableSimpleBroker("/topic", "/queue", "/user");
+        // FIXED: Removed "/user" to prevent global broker from hijacking the private user inbox routing!
+        registry.enableSimpleBroker("/topic", "/queue");
 
         // --- [USER-SPECIFIC]: Private messaging ke liye prefix ---
         registry.setUserDestinationPrefix("/user");
