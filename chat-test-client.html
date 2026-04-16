@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FriendsTogether — Chat Tester (v2)</title>
+    <title>FriendsTogether — Chat Tester (v3 Production)</title>
     <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -95,6 +95,21 @@
         }
         .offline { background: rgba(229,57,53,0.15); color: #ef5350; border: 1px solid rgba(229,57,53,0.2); }
         .online  { background: rgba(76,175,80,0.15); color: #66bb6a; border: 1px solid rgba(76,175,80,0.2); }
+
+        /* Peer Presence Badge */
+        .peer-presence {
+            text-align: center;
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: rgba(255,255,255,0.05);
+            color: #9e9e9e;
+            border: 1px solid rgba(255,255,255,0.08);
+            display: none;
+        }
+        .peer-presence.peer-online { background: rgba(76,175,80,0.1); color: #66bb6a; border-color: rgba(76,175,80,0.2); }
+        .peer-presence.peer-offline { background: rgba(229,57,53,0.1); color: #ef5350; border-color: rgba(229,57,53,0.2); }
 
         /* Subscription Badge */
         .sub-badge {
@@ -198,7 +213,7 @@
 </head>
 <body>
 
-    <h1>⚡ FriendsTogether — Real-Time Chat Tester v2</h1>
+    <h1>⚡ FriendsTogether — Real-Time Chat Tester v3 (Production)</h1>
 
     <div class="split-container">
 
@@ -220,6 +235,7 @@
             </div>
             <button id="btnDisconnect1" class="btn-disconnect" onclick="disconnectUser(1)">DISCONNECT</button>
 
+            <div id="peerPresence1" class="peer-presence">Peer status unknown</div>
             <div id="subBadge1" class="sub-badge">Not subscribed</div>
 
             <div id="chatWindow1" class="chat-window">
@@ -257,6 +273,7 @@
             </div>
             <button id="btnDisconnect2" class="btn-disconnect" onclick="disconnectUser(2)">DISCONNECT</button>
 
+            <div id="peerPresence2" class="peer-presence">Peer status unknown</div>
             <div id="subBadge2" class="sub-badge">Not subscribed</div>
 
             <div id="chatWindow2" class="chat-window">
@@ -283,9 +300,13 @@
     //  STATE MANAGEMENT
     // =========================================================================
     const state = {
-        1: { client: null, myId: '', token: '', subscription: null, currentRoomId: null },
-        2: { client: null, myId: '', token: '', subscription: null, currentRoomId: null }
+        1: { client: null, myId: '', myEmail: '', token: '', subscription: null, presenceSubscription: null, currentRoomId: null, currentReceiverId: '', receiverEmail: '', pendingEchoIds: new Set(), isManualDisconnect: false, disableReconnect: false },
+        2: { client: null, myId: '', myEmail: '', token: '', subscription: null, presenceSubscription: null, currentRoomId: null, currentReceiverId: '', receiverEmail: '', pendingEchoIds: new Set(), isManualDisconnect: false, disableReconnect: false }
     };
+
+    // Tracks peer email → presence per panel
+    const peerEmails = { 1: null, 2: null };
+    const peerEmailById = { 1: {}, 2: {} };
 
     // Mirror of backend ChatUtils.generateRoomId()
     function generateRoomId(id1, id2) {
@@ -302,44 +323,84 @@
         const cls = 'd-' + level;
         panel.innerHTML += `<span class="${cls}">[${ts}] ${icons[level] || 'ℹ️'} ${msg}</span>\n`;
         panel.scrollTop = panel.scrollHeight;
-        // Browser console mirror
         const consoleFn = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
         console[consoleFn](`[User${u}] ${msg}`);
     }
 
     // =========================================================================
-    //  TICK MARKS — ✓ SENT, ✓✓ DELIVERED, ✓✓ READ (blue)
+    //  TICK MARKS — ✓ SENT, ✓✓ DELIVERED, 🔵✓✓ READ
     // =========================================================================
     function getTickHtml(status) {
         const s = (status || '').toUpperCase();
-        if (s === 'READ')      return '<span class="msg-ticks tick-read">✓✓</span>';
+        if (s === 'READ')      return '<span class="msg-ticks tick-read">🔵✓✓</span>';
         if (s === 'DELIVERED')  return '<span class="msg-ticks tick-delivered">✓✓</span>';
         return '<span class="msg-ticks tick-sent">✓</span>'; // SENT or default
     }
 
     // =========================================================================
+    //  UPDATE TICKS FOR A SPECIFIC MESSAGE BY ID
+    // =========================================================================
+    function updateTicksForMessage(u, msgId, newStatus) {
+        const el = document.getElementById(`msg-${u}-${msgId}`);
+        if (!el) return;
+        const tickEl = el.querySelector('.msg-ticks');
+        if (!tickEl) return;
+        const newTick = getTickHtml(newStatus);
+        // Replace the tick span
+        const temp = document.createElement('div');
+        temp.innerHTML = newTick;
+        tickEl.replaceWith(temp.firstElementChild);
+    }
+
+    // =========================================================================
+    //  BULK UPDATE ALL TICKS IN A ROOM TO READ
+    // =========================================================================
+    function upgradeAllTicksToRead(u) {
+        const win = document.getElementById('chatWindow' + u);
+        const sentBubbles = win.querySelectorAll('.msg-sent');
+        sentBubbles.forEach(bubble => {
+            const tickEl = bubble.querySelector('.msg-ticks');
+            if (tickEl && !tickEl.classList.contains('tick-read')) {
+                const temp = document.createElement('div');
+                temp.innerHTML = getTickHtml('READ');
+                tickEl.replaceWith(temp.firstElementChild);
+            }
+        });
+    }
+
+    // =========================================================================
     //  UI HELPERS
     // =========================================================================
-    function appendUI(u, type, content, senderName, status) {
+    function appendUI(u, type, content, senderName, status, msgId) {
         const win = document.getElementById('chatWindow' + u);
         const time = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
         let html = '';
 
+        const msgIdAttr = msgId ? `id="msg-${u}-${msgId}" data-msgid="${msgId}"` : '';
+
+        // Delete buttons
+        const delMeBtn = msgId ? `<span style="cursor:pointer;color:#e53935;font-size:10px;padding:0 3px;" onclick="triggerDelete(${u}, ${msgId}, 'ME')">✗ Me</span>` : '';
+        const delAllBtn = (msgId && type === 'sent') ? `<span style="cursor:pointer;color:#e53935;font-size:10px;padding:0 3px;" onclick="triggerDelete(${u}, ${msgId}, 'ALL')">✗ All</span>` : '';
+
         if (type === 'system') {
             html = `<div class="msg-system">${content}</div>`;
         } else if (type === 'sent') {
-            html = `<div class="msg-bubble msg-sent">
-                        <div>${content}</div>
+            html = `<div class="msg-bubble msg-sent" ${msgIdAttr}>
+                        <div class="msg-content">${content}</div>
                         <div class="msg-meta">
+                            ${delAllBtn} ${delMeBtn}
                             <span class="msg-time">${time}</span>
                             ${getTickHtml(status || 'SENT')}
                         </div>
                     </div>`;
         } else if (type === 'received') {
-            html = `<div class="msg-bubble msg-received">
+            html = `<div class="msg-bubble msg-received" ${msgIdAttr}>
                         <div class="sender-name">${senderName || 'Unknown'}</div>
-                        <div>${content}</div>
-                        <div class="msg-meta"><span class="msg-time">${time}</span></div>
+                        <div class="msg-content">${content}</div>
+                        <div class="msg-meta">
+                            ${delMeBtn}
+                            <span class="msg-time">${time}</span>
+                        </div>
                     </div>`;
         }
 
@@ -361,21 +422,182 @@
             status.className = 'status offline';
             auth.style.display = 'block';
             disc.style.display = 'none';
-            // Clear subscription badge
             const badge = document.getElementById('subBadge' + u);
             badge.style.display = 'none';
             badge.textContent = 'Not subscribed';
         }
     }
 
-    function updateSubBadge(u, roomId) {
+    function updateSubBadge(u, text) {
         const badge = document.getElementById('subBadge' + u);
-        if (roomId) {
-            badge.textContent = `📡 Subscribed → /queue/chat-${roomId}`;
+        if (text) {
+            badge.textContent = `📡 ${text}`;
             badge.style.display = 'block';
         } else {
             badge.textContent = 'Not subscribed';
             badge.style.display = 'none';
+        }
+    }
+
+    function updatePeerPresence(u, email, status) {
+        const el = document.getElementById('peerPresence' + u);
+
+        // Debug: log raw presence data for troubleshooting
+        log(u, `[PRESENCE-UI] Raw event → email: "${email}", status: "${status}", myPeerEmail: "${peerEmails[u] || 'not set'}"`, 'sub');
+
+        // DO NOT block any presence events — show all online/offline changes
+        // If we know our peer email, highlight it; otherwise show latest event
+        el.style.display = 'block';
+        if (status === 'ONLINE') {
+            el.textContent = `🟢 ${email} is Online`;
+            el.className = 'peer-presence peer-online';
+        } else {
+            el.textContent = `⚫ ${email} is Offline`;
+            el.className = 'peer-presence peer-offline';
+        }
+
+        // Auto-learn peer email from presence events
+        // If the event email is NOT our own, it's likely our peer
+        if (peerEmails[u] === null && state[u].myEmail && email !== state[u].myEmail) {
+            peerEmails[u] = email;
+            log(u, `[PRESENCE-UI] Auto-learned peer email: ${email}`, 'sub');
+        }
+    }
+
+    function updateStatusUI(u, statusText) {
+        const el = document.getElementById('peerPresence' + u);
+        if (!el) return;
+
+        el.style.display = 'block';
+        el.textContent = statusText;
+
+        if (statusText.includes('Online')) {
+            el.className = 'peer-presence peer-online';
+        } else if (statusText.includes('Offline')) {
+            el.className = 'peer-presence peer-offline';
+        } else {
+            el.className = 'peer-presence';
+        }
+    }
+
+    function getOtherPanel(u) {
+        return u === 1 ? 2 : 1;
+    }
+
+    function setReceiverEmail(u, receiverId, receiverEmail, source) {
+        const s = state[u];
+        s.currentReceiverId = String(receiverId || '').trim();
+        s.receiverEmail = String(receiverEmail || '').trim();
+        peerEmails[u] = s.receiverEmail || null;
+        if (s.currentReceiverId && s.receiverEmail) {
+            peerEmailById[u][s.currentReceiverId] = s.receiverEmail;
+        }
+
+        log(u, `[PRESENCE] receiverEmail initialized from ${source}: "${s.receiverEmail || 'null'}" for receiverId="${s.currentReceiverId || 'null'}"`, s.receiverEmail ? 'sub' : 'warn');
+    }
+
+    function resolveReceiverEmail(u, receiverId) {
+        const normalizedReceiverId = String(receiverId || '').trim();
+        if (!normalizedReceiverId) return '';
+
+        const s = state[u];
+        if (s.currentReceiverId === normalizedReceiverId && s.receiverEmail) {
+            return s.receiverEmail;
+        }
+
+        if (peerEmailById[u][normalizedReceiverId]) {
+            return peerEmailById[u][normalizedReceiverId];
+        }
+
+        const otherPanel = getOtherPanel(u);
+        if (String(state[otherPanel].myId || '').trim() === normalizedReceiverId && state[otherPanel].myEmail) {
+            return state[otherPanel].myEmail;
+        }
+
+        return '';
+    }
+
+    function subscribeToPresence(u) {
+        const s = state[u];
+        if (!s.client || !s.client.connected) {
+            log(u, `[PRESENCE] Cannot subscribe — client not connected`, 'warn');
+            return;
+        }
+
+        if (s.presenceSubscription) {
+            s.presenceSubscription.unsubscribe();
+            s.presenceSubscription = null;
+            log(u, `[PRESENCE] Previous /topic/status subscription cleared`, 'sub');
+        }
+
+        log(u, `[PRESENCE] Preparing subscription → myEmail: "${s.myEmail}", receiverEmail: "${s.receiverEmail || 'null'}"`, 'sub');
+
+        if (!s.receiverEmail) {
+            log(u, `[PRESENCE] receiverEmail is null — skipping presence subscription`, 'warn');
+            updateStatusUI(u, 'Peer status unknown');
+            return;
+        }
+
+        reconcileInitialPresence(u);
+
+        log(u, `[PRESENCE] Subscribing to /topic/status AFTER receiverEmail initialization`, 'sub');
+        s.presenceSubscription = s.client.subscribe('/topic/status', function(statusMsg) {
+            try {
+                const event = JSON.parse(statusMsg.body);
+                const myEmail = state[u].myEmail;
+                const receiverEmail = state[u].receiverEmail;
+
+                log(u, `[PRESENCE] Event: ${statusMsg.body}`);
+                log(u, `[PRESENCE] myEmail: "${myEmail}"`);
+                log(u, `[PRESENCE] receiverEmail: "${receiverEmail || 'null'}"`);
+
+                if (!receiverEmail) {
+                    log(u, `[PRESENCE] receiverEmail is null — skipping presence update`, 'warn');
+                    return;
+                }
+
+                if (event.user === receiverEmail) {
+                    log(u, `[PRESENCE] Match confirmed → event.user === receiverEmail`, 'sub');
+                    if (event.status === 'ONLINE') {
+                        updateStatusUI(u, '🟢 Online');
+                        updatePeerPresence(u, event.user, 'ONLINE');
+                    } else {
+                        updateStatusUI(u, '⚫ Offline');
+                        updatePeerPresence(u, event.user, 'OFFLINE');
+                    }
+                } else {
+                    log(u, `[PRESENCE] Ignored event for "${event.user}" — active chat peer is "${receiverEmail}"`, 'sub');
+                }
+            } catch (e) {
+                log(u, `[PRESENCE] Parse error: ${e.message}`, 'error');
+            }
+        });
+        log(u, `[PRESENCE] ✅ Subscribed to /topic/status`, 'sub');
+    }
+
+    function reconcileInitialPresence(u) {
+        const receiverEmail = state[u].receiverEmail;
+        if (!receiverEmail) return;
+
+        const otherPanel = getOtherPanel(u);
+        const otherState = state[otherPanel];
+        const samePeer =
+            String(otherState.myId || '').trim() === String(state[u].currentReceiverId || '').trim() &&
+            String(otherState.myEmail || '').trim() === String(receiverEmail).trim();
+
+        if (!samePeer) {
+            log(u, `[PRESENCE] Initial reconcile skipped — peer is not the other local panel`, 'sub');
+            return;
+        }
+
+        if (otherState.client && otherState.client.connected) {
+            log(u, `[PRESENCE] Initial reconcile → peer already connected locally, marking ONLINE`, 'sub');
+            updateStatusUI(u, '🟢 Online');
+            updatePeerPresence(u, receiverEmail, 'ONLINE');
+        } else {
+            log(u, `[PRESENCE] Initial reconcile → peer not connected locally, marking OFFLINE`, 'sub');
+            updateStatusUI(u, '⚫ Offline');
+            updatePeerPresence(u, receiverEmail, 'OFFLINE');
         }
     }
 
@@ -390,9 +612,28 @@
         if (!myId)  { alert('My ID required for User ' + u); return; }
         if (token.startsWith('Bearer ')) token = token.substring(7);
 
-        // Persist in state
+        if (state[u].client) {
+            disconnectUser(u, true);
+        }
+
         state[u].myId  = myId;
         state[u].token = token;
+        state[u].isManualDisconnect = false;
+        state[u].disableReconnect = false;
+
+        // Decode email from JWT payload (base64 middle segment)
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            state[u].myEmail = payload.sub || payload.email || '';
+            log(u, `JWT decoded — myEmail: "${state[u].myEmail}"`);
+        } catch (e) {
+            log(u, `JWT decode failed — myEmail not set: ${e.message}`, 'warn');
+            state[u].myEmail = '';
+            state[u].disableReconnect = true;
+            appendUI(u, 'system', '❌ Invalid JWT format. Auto-reconnect disabled.');
+            updateConnectionUI(u, false);
+            return;
+        }
 
         log(u, `Connecting... myId="${myId}"`);
         appendUI(u, 'system', 'Connecting...');
@@ -400,7 +641,7 @@
         const client = new StompJs.Client({
             brokerURL: 'ws://localhost:8080/ws',
             connectHeaders: { 'Authorization': 'Bearer ' + token },
-            reconnectDelay: 5000,
+            reconnectDelay: 0,
             heartbeatIncoming: 10000,
             heartbeatOutgoing: 10000,
         });
@@ -410,7 +651,41 @@
             appendUI(u, 'system', '✅ Connected!');
             log(u, `STOMP connected. Frame: ${frame}`);
 
-            // If receiver ID is already filled, auto-subscribe
+            // ─── READ RECEIPTS ───
+            client.subscribe('/user/queue/read-receipts', function(receipt) {
+                try {
+                    const readData = JSON.parse(receipt.body);
+                    log(u, `🔵 [READ] Blue tick received — room: ${readData.roomId}, count: ${readData.updatedCount}, by: ${readData.receiver}`);
+                    // Targeted: upgrade all sent message ticks in the active chat to READ
+                    upgradeAllTicksToRead(u);
+                } catch (e) {
+                    log(u, `[READ] Parse error: ${e.message}`, 'error');
+                }
+            });
+
+            // ─── DELETE EVENTS ───
+            client.subscribe('/user/queue/delete-events', function(delEvt) {
+                try {
+                    const delData = JSON.parse(delEvt.body);
+                    log(u, `🗑️ [DELETE] Event → msgId: ${delData.messageId} | deleteType: ${delData.deleteType}`);
+                    const element = document.getElementById(`msg-${u}-${delData.messageId}`);
+                    if (element) {
+                        if (delData.deleteType === 'ALL') {
+                            // Mask content visually (mirrors backend DTO masking)
+                            const contentDiv = element.querySelector('.msg-content');
+                            if (contentDiv) contentDiv.innerText = delData.content;
+                            // Remove delete buttons after deletion
+                            element.querySelectorAll('[onclick^="triggerDelete"]').forEach(btn => btn.remove());
+                        } else if (delData.deleteType === 'ME') {
+                            element.remove();
+                        }
+                    }
+                } catch (e) {
+                    log(u, `[DELETE] Parse error: ${e.message}`, 'error');
+                }
+            });
+
+            // If receiver ID is already filled, auto-subscribe + load history
             const targetId = document.getElementById('targetId' + u).value.trim();
             if (targetId) {
                 switchSubscription(u, targetId);
@@ -420,8 +695,13 @@
         };
 
         client.onStompError = function(frame) {
-            log(u, `STOMP ERROR: ${frame.headers['message']}`, 'error');
-            appendUI(u, 'system', '❌ STOMP Error: ' + frame.headers['message']);
+            const message = frame.headers['message'] || 'Unknown STOMP error';
+            state[u].disableReconnect = true;
+            log(u, `STOMP ERROR: ${message}`, 'error');
+            appendUI(u, 'system', '❌ STOMP Error: ' + message + ' — auto reconnect stopped');
+            if (state[u].client) {
+                state[u].client.deactivate();
+            }
         };
 
         client.onWebSocketError = function(event) {
@@ -432,29 +712,56 @@
             log(u, `WebSocket CLOSED. Code=${event.code} Reason=${event.reason}`, 'warn');
             updateConnectionUI(u, false);
             state[u].subscription = null;
-            appendUI(u, 'system', '🔌 Disconnected. Auto-reconnecting in 5s...');
+            state[u].presenceSubscription = null;
+            state[u].client = null;
+            if (state[u].isManualDisconnect) {
+                appendUI(u, 'system', '🔌 Disconnected.');
+                state[u].isManualDisconnect = false;
+                return;
+            }
+
+            if (state[u].disableReconnect || event.code === 1002) {
+                state[u].disableReconnect = true;
+                appendUI(u, 'system', '🔒 Connection closed. Auto-reconnect disabled due to auth/protocol failure.');
+                return;
+            }
+
+            appendUI(u, 'system', '🔌 Disconnected. Reconnect manually if needed.');
         };
 
         client.activate();
         state[u].client = client;
     }
 
-    function disconnectUser(u) {
+    function disconnectUser(u, silent = false) {
+        state[u].isManualDisconnect = true;
+        state[u].disableReconnect = true;
         if (state[u].client) {
             state[u].client.deactivate();
             state[u].client = null;
         }
+        if (state[u].presenceSubscription) {
+            state[u].presenceSubscription.unsubscribe();
+            state[u].presenceSubscription = null;
+        }
         state[u].subscription = null;
+        state[u].currentReceiverId = '';
+        state[u].receiverEmail = '';
+        peerEmails[u] = null;
+        state[u].pendingEchoIds.clear();
         updateConnectionUI(u, false);
         updateSubBadge(u, null);
-        appendUI(u, 'system', '🔌 Manual disconnect.');
-        log(u, 'Manually disconnected');
+        updateStatusUI(u, 'Peer status unknown');
+        if (!silent) {
+            appendUI(u, 'system', '🔌 Manual disconnect.');
+            log(u, 'Manually disconnected');
+        }
     }
 
     // =========================================================================
-    //  STATIC SUBSCRIPTION & SWITCHING LOGIC (WhatsApp Style)
+    //  SUBSCRIPTION & SWITCHING LOGIC
     // =========================================================================
-    function switchSubscription(u, receiverId) {
+    async function switchSubscription(u, receiverId) {
         const s = state[u];
         if (!s.client || !s.client.connected) {
             log(u, 'Cannot sync — not connected', 'warn');
@@ -468,12 +775,20 @@
 
         // Self-message prevention
         if (receiverId === myId) {
-            log(u, `BLOCKED: receiverId "${receiverId}" === myId "${myId}" — khud ko message nahi bhej sakte!`, 'error');
+            log(u, `BLOCKED: receiverId "${receiverId}" === myId "${myId}"`, 'error');
             appendUI(u, 'system', '⚠️ Cannot chat with yourself!');
             return;
         }
 
-        // Subscribing to personal inbox ONLY ONCE
+        let receiverEmail = resolveReceiverEmail(u, receiverId);
+        if (receiverEmail) {
+            setReceiverEmail(u, receiverId, receiverEmail, 'selected user state');
+        } else {
+            setReceiverEmail(u, receiverId, '', 'selected user state');
+            log(u, `[PRESENCE] receiverEmail not available yet for receiverId="${receiverId}"`, 'warn');
+        }
+
+        // Subscribe to personal inbox ONLY ONCE
         if (!s.subscription) {
             const dest = '/user/queue/messages';
             log(u, `Subscribing to private inbox: ${dest}`, 'sub');
@@ -482,15 +797,27 @@
                 handleIncomingMessage(u, messageOutput);
             });
             updateSubBadge(u, 'Inbox: /user/queue/messages');
-            appendUI(u, 'system', `📡 Listening on private inbox`);
+            appendUI(u, 'system', '📡 Listening on private inbox');
         }
 
-        // Auto-load history for this specific receiver
-        loadHistory(u, receiverId);
+        // Update the current room for context
+        s.currentRoomId = generateRoomId(myId, receiverId);
+
+        if (!s.receiverEmail) {
+            await loadHistory(u, receiverId);
+            receiverEmail = resolveReceiverEmail(u, receiverId);
+            if (receiverEmail) {
+                setReceiverEmail(u, receiverId, receiverEmail, 'chat history');
+            }
+        } else {
+            loadHistory(u, receiverId);
+        }
+
+        subscribeToPresence(u);
     }
 
     // =========================================================================
-    //  INCOMING MESSAGE HANDLER
+    //  INCOMING MESSAGE HANDLER (with self-echo fix)
     // =========================================================================
     function handleIncomingMessage(u, messageOutput) {
         try {
@@ -499,23 +826,83 @@
             const myId     = String(state[u].myId).trim();
             const senderDisplay = msg.sender.username || msg.sender.email || senderId;
 
-            log(u, `MSG RECEIVED → sender="${senderId}" (${senderDisplay}) content="${msg.content}" status=${msg.status}`);
+            // Store peer email for presence tracking
+            if (senderId !== myId && msg.sender.email) {
+                peerEmailById[u][senderId] = msg.sender.email;
+                peerEmails[u] = msg.sender.email;
+                if (state[u].currentReceiverId === senderId) {
+                    setReceiverEmail(u, senderId, msg.sender.email, 'incoming message');
+                }
+            }
+            if (msg.receiver && msg.receiver.email && senderId === myId) {
+                peerEmailById[u][String(msg.receiver.userId || '').trim()] = msg.receiver.email;
+                peerEmails[u] = msg.receiver.email;
+                if (state[u].currentReceiverId === String(msg.receiver.userId || '').trim()) {
+                    setReceiverEmail(u, msg.receiver.userId, msg.receiver.email, 'outgoing echo');
+                }
+            }
 
-            // Filter incoming message if we are not presently chatting with this user
+            log(u, `MSG → sender="${senderId}" content="${msg.content}" status=${msg.status} id=${msg.id}`);
+
+            // ─── SELF-ECHO HANDLING (FIX) ───
+            // Server echoes back our own message with server-assigned ID and status.
+            // Use this to update the optimistic UI instead of dropping it.
+            if (senderId === myId) {
+                if (state[u].pendingEchoIds.has(msg.content)) {
+                    // This is an echo of our optimistic message — update it with real ID
+                    state[u].pendingEchoIds.delete(msg.content);
+                    log(u, `ECHO confirmed — id: ${msg.id}, status: ${msg.status}`);
+
+                    // Find the last sent message without an id and assign the real id
+                    const win = document.getElementById('chatWindow' + u);
+                    const untagged = win.querySelectorAll('.msg-sent:not([data-msgid])');
+                    if (untagged.length > 0) {
+                        const lastUntagged = untagged[untagged.length - 1];
+                        lastUntagged.setAttribute('data-msgid', msg.id);
+                        lastUntagged.setAttribute('id', `msg-${u}-${msg.id}`);
+
+                        // Add delete buttons now that we have a real ID
+                        const meta = lastUntagged.querySelector('.msg-meta');
+                        if (meta) {
+                            const delAllBtn = document.createElement('span');
+                            delAllBtn.style.cssText = 'cursor:pointer;color:#e53935;font-size:10px;padding:0 3px;';
+                            delAllBtn.setAttribute('onclick', `triggerDelete(${u}, ${msg.id}, 'ALL')`);
+                            delAllBtn.textContent = '✗ All';
+
+                            const delMeBtn = document.createElement('span');
+                            delMeBtn.style.cssText = 'cursor:pointer;color:#e53935;font-size:10px;padding:0 3px;';
+                            delMeBtn.setAttribute('onclick', `triggerDelete(${u}, ${msg.id}, 'ME')`);
+                            delMeBtn.textContent = '✗ Me';
+
+                            meta.insertBefore(delMeBtn, meta.firstChild);
+                            meta.insertBefore(delAllBtn, meta.firstChild);
+                        }
+
+                        // Update tick to reflect server status (SENT → DELIVERED if receiver was online)
+                        updateTicksForMessage(u, msg.id, msg.status);
+                    }
+                }
+                return; // Don't render duplicate
+            }
+
+            // ─── INCOMING FROM OTHER USER ───
+            // Only render if currently chatting with this sender
             const currentTarget = String(document.getElementById('targetId' + u).value).trim();
             if (senderId !== currentTarget) {
-                log(u, `Message from ${senderDisplay} ignored because currently chatting with ${currentTarget}`);
-                // In a real app, this would show a notification bubble instead of rendering
+                log(u, `Message from ${senderDisplay} (not current target ${currentTarget}) — notification only`);
+                appendUI(u, 'system', `💬 New message from ${senderDisplay}`);
                 return;
             }
 
-            // Skip self-sent messages via websocket (shouldn't happen with convertAndSendToUser anyway)
-            if (senderId === myId) {
-                return;
+            // Display as received
+            appendUI(u, 'received', msg.content, senderDisplay, msg.status, msg.id);
+
+            // Auto-fire read receipt since chat is open
+            const roomId = state[u].currentRoomId;
+            if (roomId) {
+                onChatOpen(u, roomId, state[u].token);
             }
 
-            // Display as received with sender name and status
-            appendUI(u, 'received', msg.content, senderDisplay, msg.status);
         } catch (e) {
             log(u, `Parse error: ${e.message}. Raw: ${messageOutput.body}`, 'error');
         }
@@ -537,18 +924,18 @@
         const content    = input.value.trim();
 
         if (!receiverId || !content) {
-            alert('Receiver ID aur Message dono zaroori hain!');
+            alert('Receiver ID and Message both required!');
             return;
         }
 
-        // CRITICAL: Self-message prevention
+        // Self-message prevention
         if (receiverId === myId) {
-            alert('⚠️ Khud ko message nahi bhej sakte!');
-            log(u, `BLOCKED self-message: receiverId="${receiverId}" === myId="${myId}"`, 'error');
+            alert('⚠️ Cannot send message to yourself!');
+            log(u, `BLOCKED self-message`, 'error');
             return;
         }
 
-        // If not subscribed to personal inbox yet, do it now
+        // Subscribe if not already
         if (!s.subscription) {
             switchSubscription(u, receiverId);
         }
@@ -559,14 +946,17 @@
             type: 'TEXT'
         };
 
-        log(u, `SENDING → ${JSON.stringify(chatRequest)} | dest=/app/chat.sendMessage`);
+        log(u, `SENDING → ${JSON.stringify(chatRequest)}`);
+
+        // Track this message content for echo matching
+        s.pendingEchoIds.add(content);
 
         s.client.publish({
             destination: '/app/chat.sendMessage',
             body: JSON.stringify(chatRequest)
         });
 
-        // Optimistic UI — show immediately with single tick
+        // Optimistic UI — show immediately with single tick (no data-msgid yet)
         appendUI(u, 'sent', content, null, 'SENT');
         input.value = '';
     }
@@ -583,19 +973,17 @@
         if (!token || !receiverId) return;
 
         const expectedRoom = generateRoomId(myId, receiverId);
-        log(u, `Loading history → myId="${myId}" receiverId="${receiverId}" room="${expectedRoom}"`);
+        log(u, `Loading history → room="${expectedRoom}"`);
         appendUI(u, 'system', '⏳ Loading history...');
 
         try {
             const url = `http://localhost:8080/api/chat/history/${receiverId}`;
-            log(u, `GET ${url}`);
-
             const res = await fetch(url, {
                 method: 'GET',
                 headers: { 'Authorization': 'Bearer ' + token }
             });
 
-            log(u, `Response: ${res.status}`);
+            log(u, `History response: ${res.status}`);
 
             if (!res.ok) {
                 const errText = await res.text();
@@ -609,16 +997,12 @@
             if (messages.length === 0) {
                 appendUI(u, 'system', 'No previous messages.');
                 log(u, 'History: 0 messages');
+                // Still fire read receipt
+                onChatOpen(u, expectedRoom, token);
                 return;
             }
 
             log(u, `History: ${messages.length} messages loaded`);
-
-            // DEBUG: Log first message for verification
-            if (messages.length > 0) {
-                const first = messages[0];
-                log(u, `FIRST MSG → sender.userId="${first.sender.userId}" myId="${myId}" match=${String(first.sender.userId).trim() === myId}`);
-            }
 
             // Clear chat window and re-render
             document.getElementById('chatWindow' + u).innerHTML = '';
@@ -627,21 +1011,71 @@
                 const senderId = String(msg.sender.userId).trim();
                 const senderDisplay = msg.sender.username || msg.sender.email || senderId;
 
+                // Track peer email for presence
+                if (senderId !== myId && msg.sender.email) {
+                    peerEmailById[u][senderId] = msg.sender.email;
+                    peerEmails[u] = msg.sender.email;
+                }
+                if (senderId === myId && msg.receiver && msg.receiver.email) {
+                    peerEmailById[u][String(msg.receiver.userId || '').trim()] = msg.receiver.email;
+                    peerEmails[u] = msg.receiver.email;
+                }
+
                 if (senderId === myId) {
-                    // MY message — show on right side with tick
-                    appendUI(u, 'sent', msg.content, null, msg.status);
+                    appendUI(u, 'sent', msg.content, null, msg.status, msg.id);
                 } else {
-                    // THEIR message — show on left side with sender name
-                    appendUI(u, 'received', msg.content, senderDisplay, msg.status);
+                    appendUI(u, 'received', msg.content, senderDisplay, msg.status, msg.id);
                 }
             });
 
             appendUI(u, 'system', `✅ History loaded (${messages.length} messages)`);
 
+            // Fire read receipt
+            onChatOpen(u, expectedRoom, token);
+
         } catch (err) {
             log(u, `History error: ${err.message}`, 'error');
             appendUI(u, 'system', '❌ Error: ' + err.message);
         }
+    }
+
+    // =========================================================================
+    //  READ RECEIPT TRIGGER
+    // =========================================================================
+    function onChatOpen(u, roomId, token) {
+        log(u, `[READ] Firing read receipt POST for room: ${roomId}`);
+        fetch(`http://localhost:8080/api/chat/read/${roomId}`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        }).then(res => {
+            if (res.ok) log(u, `[READ] ✅ Read receipt dispatched successfully`);
+            else log(u, `[READ] ⚠️ Read receipt response: ${res.status}`, 'warn');
+        }).catch(err => log(u, `[READ] ❌ Read receipt failure: ${err}`, 'error'));
+    }
+
+    // =========================================================================
+    //  TRIGGER DELETE
+    // =========================================================================
+    function triggerDelete(u, msgId, type) {
+        if (!confirm(`Confirm Delete for ${type}?`)) return;
+        const token = state[u].token;
+        log(u, `[DELETE] Firing DELETE for msgId: ${msgId}, type: ${type}`);
+
+        fetch(`http://localhost:8080/api/chat/message/${msgId}?type=` + type, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token }
+        }).then(res => {
+            if (!res.ok) {
+                res.text().then(body => {
+                    log(u, `[DELETE] ❌ Failed! ${res.status}: ${body}`, 'error');
+                    if (body.includes('time limit')) {
+                        appendUI(u, 'system', '⏰ Cannot delete — 10-minute window expired');
+                    }
+                });
+            } else {
+                log(u, `[DELETE] ✅ Delete API success`);
+            }
+        }).catch(err => log(u, `[DELETE] ❌ HTTP Error: ${err}`, 'error'));
     }
 
     // =========================================================================
@@ -651,7 +1085,6 @@
         [1, 2].forEach(function(u) {
             const targetInput = document.getElementById('targetId' + u);
 
-            // On blur or change — switch subscription
             targetInput.addEventListener('change', function() {
                 const val = targetInput.value.trim();
                 if (val && state[u].client && state[u].client.connected) {
@@ -660,7 +1093,6 @@
                 }
             });
 
-            // On Enter — also switch
             targetInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     const val = targetInput.value.trim();

@@ -46,5 +46,7 @@ public class ChatMessage {
     private String mediaUrl; // For images/videos
     private boolean isDeletedForSender = false;
     private boolean isDeletedForReceiver = false;
+    private boolean isDeletedForAll = false;
+    private LocalDateTime deletedAt; // Tracks when delete-for-all was executed (10-min limit enforcement)
 }
 
