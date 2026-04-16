@@ -28,15 +28,21 @@ public class User {
     @Column(unique = true, nullable = false)
     private String email;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     @Column(nullable = false)
     private String password;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String otp;
+    
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private LocalDateTime otpExpiry;
+    
     private boolean isEnabled = false;
 
     // RELATION: One-to-One with UserProfile
     // mappedBy ka matlab hai ki relation ki asli malik 'UserProfile' table hai
+    @com.fasterxml.jackson.annotation.JsonManagedReference
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private UserProfile profile;
 }
