@@ -135,30 +135,46 @@ public class ChatService {
     public List<ChatMessageResponse> getChatHistory(String userId1, String userId2, int limit) {
         log.info("[CHAT-SVC] Fetching personal chat history between {} and {} (limit: {})", userId1, userId2, limit);
 
-        // 🔥 BI-DIRECTIONAL QUERY: Dono side ke messages uthayega
+        /* OLD BUGGY LOGIC (Commented out for reference):
+        // This was fetching oldest messages instead of newest
         List<ChatMessage> messages = chatMessageRepository.findPersonalChatHistory(userId1, userId2);
-
         return messages.stream()
                 .filter(msg -> {
-                    // Determine perspective dynamically
                     boolean isSender = msg.getSender().getUserId().equals(userId1);
                     boolean isReceiver = msg.getReceiver().getUserId().equals(userId1);
-
-                    // Hide locally deleted messages
                     if (isSender && msg.isDeletedForSender()) return false;
                     if (isReceiver && msg.isDeletedForReceiver()) return false;
-
                     return true;
                 })
-                .map(msg -> {
-                    // Global masking for delete-for-all
-                    if (msg.isDeletedForAll()) {
-                        return toMaskedResponseDto(msg);
-                    }
-                    return toResponseDto(msg);
-                })
-                .limit(limit) // Apply limit as per controller
+                .map(msg -> msg.isDeletedForAll() ? toMaskedResponseDto(msg) : toResponseDto(msg))
+                .limit(limit)
                 .collect(Collectors.toList());
+        */
+
+        // NEW CORRECT LOGIC:
+        // 1. Deterministic Room ID
+        String roomId = ChatUtils.generateRoomId(userId1, userId2);
+        
+        // 2. Fetch NEWEST messages first (DESC) using Pageable
+        Pageable pageable = PageRequest.of(0, limit);
+        List<ChatMessage> messages = chatMessageRepository.findByRoomIdOrderByTimestampDesc(roomId, pageable);
+
+        // 3. Process and filter
+        List<ChatMessageResponse> responseList = messages.stream()
+                .filter(msg -> {
+                    boolean isSender = msg.getSender().getUserId().equals(userId1);
+                    boolean isReceiver = msg.getReceiver().getUserId().equals(userId1);
+                    if (isSender && msg.isDeletedForSender()) return false;
+                    if (isReceiver && msg.isDeletedForReceiver()) return false;
+                    return true;
+                })
+                .map(msg -> msg.isDeletedForAll() ? toMaskedResponseDto(msg) : toResponseDto(msg))
+                .collect(Collectors.toList());
+
+        // 4. 🔥 IMPORTANT: Reverse to chronological order (ASC) for frontend
+        Collections.reverse(responseList);
+        
+        return responseList;
     }
 
     // ====================================================================
