@@ -72,6 +72,7 @@ public class SocialService {
                 .level(targetUser.getProfile().getLevel())
                 .status(friendshipStatus)
                 .friendsCount(totalFriends) // --- [FRIENDS COUNT CHANGE]: Response mein set kar dena ---
+                .email(targetUser.getEmail())
                 .build();
     }
 
@@ -141,6 +142,7 @@ public class SocialService {
                             .avatarUrl(sender.getProfile().getAvatarUrl())
                             .level(sender.getProfile().getLevel())
                             .status("PENDING_RECEIVED")
+                            .email(sender.getEmail())
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -245,6 +247,7 @@ public class SocialService {
                     .avatarUrl(friend.getProfile().getAvatarUrl())
                     .level(friend.getProfile().getLevel())
                     .status("FRIENDS")
+                    .email(friend.getEmail())
                     .build();
         }).collect(Collectors.toList());
     }

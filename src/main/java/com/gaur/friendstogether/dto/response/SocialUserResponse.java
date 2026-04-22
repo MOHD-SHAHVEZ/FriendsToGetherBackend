@@ -12,4 +12,5 @@ public class SocialUserResponse {
     private int level;
     private String status; // "STRANGER", "PENDING", "FRIENDS", "SELF"
     private Long friendsCount;
+    private String email;
 }

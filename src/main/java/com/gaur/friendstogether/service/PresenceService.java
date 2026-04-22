@@ -7,6 +7,7 @@ import org.springframework.messaging.simp.user.SimpUserRegistry;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -64,5 +65,22 @@ public class PresenceService {
             log.warn("[REDIS] Failure fetching online users. Error: {}", e.getMessage());
             return Collections.emptySet();
         }
+    }
+
+    /**
+     * Optimized Bulk check for friend lists.
+     * It uses the existing isOnline(email) which handles Redis + Fallback.
+     */
+    public Map<String, Boolean> getBulkStatus(Set<String> emails) {
+        if (emails == null || emails.isEmpty()) {
+            return java.util.Collections.emptyMap();
+        }
+
+        return emails.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        email -> email,
+                        this::isOnline,
+                        (existing, replacement) -> existing // Duplicate emails handle karne ke liye
+                ));
     }
 }
