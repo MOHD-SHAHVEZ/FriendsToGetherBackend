@@ -33,12 +33,17 @@ public class UserService {
         }
 
         return UserProfileResponse.builder()
+                .userId(user.getUserId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .nickname(user.getProfile().getNickname())
                 .level(user.getProfile().getLevel())
                 .avatarUrl(user.getProfile().getAvatarUrl())
                 .titleBadge(user.getProfile().getTitleBadge())
+                .dob(user.getProfile().getDob())
+                .gender(user.getProfile().getGender())
+                .region(user.getProfile().getRegion())
+                .signature(user.getProfile().getSignature())
                 .build();
     }
 
