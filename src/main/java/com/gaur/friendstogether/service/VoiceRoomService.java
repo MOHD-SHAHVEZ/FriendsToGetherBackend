@@ -339,6 +339,10 @@ public class VoiceRoomService {
         targetMember.setLeftAt(LocalDateTime.now());
         roomMemberRepository.save(targetMember);
 
+        // 4.5 ATOMIC COUNT SYNC: Kicked member ka count bhi minus hona chahiye
+        voiceRoomRepository.updateMemberCount(room.getId(), -1);
+        log.info("COUNT_DEC (KICK) -> Room: {}, KickedUser: {}", roomId, targetUserId);
+
         log.info("Successfully kicked user '{}' from room '{}'", targetUserId, roomId);
         // Kick Logs Store in a Table (Kick -> store in RoomModerationLog)
         saveModerationLog(room, actor, targetUser, ModerationAction.KICK, "Kicked by moderator");

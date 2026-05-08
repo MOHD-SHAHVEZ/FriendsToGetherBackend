@@ -23,6 +23,7 @@ public class SocialService {
     private final UserRepository userRepository;
     private final FriendshipRepository friendshipRepository;
 
+    @Transactional(readOnly = true)
     public SocialUserResponse searchByUserId(String targetUserId, String currentUserEmail) {
         log.debug("Entering searchByUserId. targetUserId: {}, currentUserEmail: {}", targetUserId, currentUserEmail);
 
@@ -127,6 +128,7 @@ public class SocialService {
     // ===========================
 
     // 1. Pending Requests nikalne ke liye
+    @Transactional(readOnly = true)
     public List<SocialUserResponse> getPendingRequests(String currentUserEmail) {
         User currentUser = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -231,6 +233,7 @@ public class SocialService {
     // Fetch list of my All Friends
     // 1. Mere saare Friends ki list nikalna
     // ==========================================
+    @Transactional(readOnly = true)
     public List<SocialUserResponse> getMyFriends(String currentUserEmail) {
         User currentUser = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -263,11 +266,22 @@ public class SocialService {
                 .orElseThrow(() -> new RuntimeException("Friend not found"));
 
         // Dono taraf se check karna padega (A to B ya B to A)
-        Optional<Friendship> friendship = friendshipRepository.findBySenderAndReceiver(currentUser, friend)
-                .or(() -> friendshipRepository.findBySenderAndReceiver(friend, currentUser));
+        Optional<Friendship> direction1 = friendshipRepository.findBySenderAndReceiver(currentUser, friend);
+        Optional<Friendship> direction2 = friendshipRepository.findBySenderAndReceiver(friend, currentUser);
 
-        if (friendship.isPresent() && friendship.get().getStatus() == FriendshipStatus.ACCEPTED) {
-            friendshipRepository.delete(friendship.get());
+        boolean found = false;
+
+        // Delete both directions (acceptFriendRequest creates 2 rows)
+        if (direction1.isPresent() && direction1.get().getStatus() == FriendshipStatus.ACCEPTED) {
+            friendshipRepository.delete(direction1.get());
+            found = true;
+        }
+        if (direction2.isPresent() && direction2.get().getStatus() == FriendshipStatus.ACCEPTED) {
+            friendshipRepository.delete(direction2.get());
+            found = true;
+        }
+
+        if (found) {
             return "Unfriended successfully.";
         }
 

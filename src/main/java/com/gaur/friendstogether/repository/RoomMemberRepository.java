@@ -28,9 +28,8 @@ public interface RoomMemberRepository extends JpaRepository<RoomMember, Long> {
     // 2. Count present Member in VoiceRoom Total:
     long countByRoomAndIsActiveTrue(VoiceRoom room);
 
-    // 3. REJOIN LOGIC: Lock lagaya hai taaki concurrency issues na aayein
-    // Lock lagaya hai jissa 2 admin ek sath data na write kar sakte ek ko mila or lock ho jaai jab tak wo complete na ho.
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    // 3. REJOIN LOGIC: Lock-free read for validation checks (kick/ban permission checks)
+    // For write operations (join/leave state changes), use findByRoomAndUserWithLock instead.
     Optional<RoomMember> findByRoomAndUser(VoiceRoom room, User user);
 
     // 4. Bulk Update: Performance improve karne ke liye single query

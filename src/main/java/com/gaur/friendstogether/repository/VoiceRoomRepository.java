@@ -28,8 +28,9 @@ public interface VoiceRoomRepository extends JpaRepository<VoiceRoom, Long> {
     Page<VoiceRoom> findDiscoveryRooms(@Param("status") RoomStatus status, Pageable pageable);
 
     // 3. ATOMIC COUNT UPDATE: Database level par count change karna (Race condition safe)
+    // GREATEST(0, ...) ensures count never goes negative on concurrent leave/kick/disconnect
     @Modifying
-    @Query("UPDATE VoiceRoom vr SET vr.currentMemberCount = vr.currentMemberCount + :delta WHERE vr.id = :id")
+    @Query("UPDATE VoiceRoom vr SET vr.currentMemberCount = GREATEST(0, vr.currentMemberCount + :delta) WHERE vr.id = :id")
     void updateMemberCount(@Param("id") Long id, @Param("delta") int delta);
 
     // 4. CATEGORY DISCOVERY: Category filtered discovery (Atomic Sync safe)

@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
-import java.util.Random;
+import java.security.SecureRandom;
 
 @Service
 @RequiredArgsConstructor
@@ -62,7 +62,7 @@ public class AuthService {
 
     // Helper: Purane unverified user ko naya OTP bhejne ke liye
     private String refreshAndResendOtp(User user, RegisterRequest request) {
-        String otp = String.format("%06d", new Random().nextInt(999999));
+        String otp = String.format("%06d", new SecureRandom().nextInt(999999));
 
         user.setUsername(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
@@ -76,7 +76,7 @@ public class AuthService {
 
     // Helper: Naya user create karne ke liye
     private String createNewRegistration(RegisterRequest request) {
-        String otp = String.format("%06d", new Random().nextInt(999999));
+        String otp = String.format("%06d", new SecureRandom().nextInt(999999));
         User user = User.builder()
                 .username(request.getUsername())
                 .email(request.getEmail())
