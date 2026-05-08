@@ -35,7 +35,9 @@ public class VoiceRoomResponse {
     // Room level (gifting / activity se increase hota hai)
     private int roomLevel;
 
-    // Lock status (UI decision ke liye)
+    // Lock status (UI decision ke liye) added by antigravity for voiceroom joining
+    // problem solve karne ka liya
+    @com.fasterxml.jackson.annotation.JsonProperty("isLocked")
     private boolean isLocked;
 
     // Category (optional - future filters ke liye useful)

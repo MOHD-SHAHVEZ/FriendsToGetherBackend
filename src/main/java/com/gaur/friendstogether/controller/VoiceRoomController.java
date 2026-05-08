@@ -5,6 +5,7 @@ import com.gaur.friendstogether.dto.response.ApiResponse;
 import com.gaur.friendstogether.dto.request.VoiceRoomRequest;
 import com.gaur.friendstogether.dto.response.ModerationLogResponse;
 import com.gaur.friendstogether.dto.response.RoomMemberResponse;
+import com.gaur.friendstogether.dto.response.VoiceRoomResponse;
 import com.gaur.friendstogether.entity.User;
 import com.gaur.friendstogether.entity.VoiceRoom;
 import com.gaur.friendstogether.exception.BusinessLogicException;
@@ -297,6 +298,26 @@ public class VoiceRoomController {
         Map<String, Object> result = voiceRoomService.demoteToMember(request, actor);
 
         return buildResponse(result, "User demoted successfully");
+    }
+
+    /**
+     * Fetch the logged-in user's personal room. added by antigravity for personal room feature
+     */
+    @GetMapping("/my-room")
+    public ResponseEntity<ApiResponse<VoiceRoomResponse>> getMyPersonalRoom(Authentication authentication) {
+        String email = authentication.getName();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        VoiceRoomResponse response = voiceRoomService.getPersonalRoom(user);
+
+        return ResponseEntity.ok(
+                ApiResponse.<VoiceRoomResponse>builder()
+                        .success(true)
+                        .message(response != null ? "Personal room found" : "No personal room found")
+                        .data(response)
+                        .build()
+        );
     }
 
     /**

@@ -816,4 +816,13 @@ public class VoiceRoomService {
                 .build();
     }
 
+    /**
+     * Fetch the personal room for a specific user Added by Antigravity to Get the Owner own Room.
+     */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public VoiceRoomResponse getPersonalRoom(com.gaur.friendstogether.entity.User owner) {
+        return voiceRoomRepository.findByOwnerAndIsPersonalTrue(owner)
+                .map(this::convertToDto)
+                .orElse(null);
+    }
 }
