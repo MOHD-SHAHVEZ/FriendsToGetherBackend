@@ -26,7 +26,7 @@ public class UserProfile {
     private String titleBadge;
 
     // ==========================================
-    // 💰 SOCIAL ECONOMY & REWARDS
+    // SOCIAL ECONOMY & REWARDS
     // ==========================================
 
     @Builder.Default
@@ -41,7 +41,7 @@ public class UserProfile {
     private LocalDate lastLoginDate; // Streak reset logic ke liye
 
     // ==========================================
-    // 🎖️ LEVELING & TIERS
+    // LEVELING & TIERS
     // ==========================================
 
     @Enumerated(EnumType.STRING)
