@@ -129,42 +129,52 @@ public class ChatService {
     }
 
     // ====================================================================
-    // CHAT HISTORY
+    // CHAT HISTORY (FIXED FOR PINK/GREY BUG)
     // ====================================================================
     @Transactional(readOnly = true)
     public List<ChatMessageResponse> getChatHistory(String userId1, String userId2, int limit) {
-        String roomId = ChatUtils.generateRoomId(userId1, userId2);
-        log.info("[CHAT-SVC] Fetching chat history — room: {}, limit: {}", roomId, limit);
+        log.info("[CHAT-SVC] Fetching personal chat history between {} and {} (limit: {})", userId1, userId2, limit);
 
+        /* OLD BUGGY LOGIC (Commented out for reference):
+        // This was fetching oldest messages instead of newest
+        List<ChatMessage> messages = chatMessageRepository.findPersonalChatHistory(userId1, userId2);
+        return messages.stream()
+                .filter(msg -> {
+                    boolean isSender = msg.getSender().getUserId().equals(userId1);
+                    boolean isReceiver = msg.getReceiver().getUserId().equals(userId1);
+                    if (isSender && msg.isDeletedForSender()) return false;
+                    if (isReceiver && msg.isDeletedForReceiver()) return false;
+                    return true;
+                })
+                .map(msg -> msg.isDeletedForAll() ? toMaskedResponseDto(msg) : toResponseDto(msg))
+                .limit(limit)
+                .collect(Collectors.toList());
+        */
+
+        // NEW CORRECT LOGIC:
+        // 1. Deterministic Room ID
+        String roomId = ChatUtils.generateRoomId(userId1, userId2);
+        
+        // 2. Fetch NEWEST messages first (DESC) using Pageable
         Pageable pageable = PageRequest.of(0, limit);
         List<ChatMessage> messages = chatMessageRepository.findByRoomIdOrderByTimestampDesc(roomId, pageable);
 
-        // Sort chronologically (oldest first for frontend display)
-        Collections.reverse(messages);
-
-        List<ChatMessageResponse> response = messages.stream()
+        // 3. Process and filter
+        List<ChatMessageResponse> responseList = messages.stream()
                 .filter(msg -> {
-                    // Determine perspective dynamically
                     boolean isSender = msg.getSender().getUserId().equals(userId1);
                     boolean isReceiver = msg.getReceiver().getUserId().equals(userId1);
-
-                    // Hide locally deleted messages
                     if (isSender && msg.isDeletedForSender()) return false;
                     if (isReceiver && msg.isDeletedForReceiver()) return false;
-
                     return true;
                 })
-                .map(msg -> {
-                    // Global masking for delete-for-all (content stays in DB, masked in DTO)
-                    if (msg.isDeletedForAll()) {
-                        return toMaskedResponseDto(msg);
-                    }
-                    return toResponseDto(msg);
-                })
+                .map(msg -> msg.isDeletedForAll() ? toMaskedResponseDto(msg) : toResponseDto(msg))
                 .collect(Collectors.toList());
 
-        log.info("[CHAT-SVC] History returned: {} messages for room {}", response.size(), roomId);
-        return response;
+        // 4. 🔥 IMPORTANT: Reverse to chronological order (ASC) for frontend
+        Collections.reverse(responseList);
+        
+        return responseList;
     }
 
     // ====================================================================
@@ -322,20 +332,16 @@ public class ChatService {
     }
 
     // ====================================================================
-    // DTO MAPPING HELPERS (DRY — eliminates 3x copy-paste)
+    // DTO MAPPING HELPERS
     // ====================================================================
 
-    /**
-     * Maps a ChatMessage entity to its standard DTO representation.
-     * Must be called within a Hibernate session (transaction) to access lazy-loaded User fields.
-     */
     private ChatMessageResponse toResponseDto(ChatMessage msg) {
         return ChatMessageResponse.builder()
                 .id(msg.getId())
                 .roomId(msg.getRoomId())
                 .content(msg.getContent())
-                .type(msg.getType() != null ? msg.getType().name() : "")
-                .status(msg.getStatus() != null ? msg.getStatus().name() : "")
+                .type(msg.getType() != null ? msg.getType().name() : "TEXT")
+                .status(msg.getStatus() != null ? msg.getStatus().name() : "SENT")
                 .timestamp(msg.getTimestamp() != null ? msg.getTimestamp().toString() : "")
                 .sender(ChatMessageResponse.UserData.builder()
                         .userId(msg.getSender().getUserId())
@@ -350,28 +356,10 @@ public class ChatService {
                 .build();
     }
 
-    /**
-     * Maps a deleted-for-all message to a masked DTO (content hidden, type=SYSTEM).
-     * Original content remains in DB but is never exposed to clients.
-     */
     private ChatMessageResponse toMaskedResponseDto(ChatMessage msg) {
-        return ChatMessageResponse.builder()
-                .id(msg.getId())
-                .roomId(msg.getRoomId())
-                .content("\uD83D\uDEAB This message was deleted")
-                .type(MessageType.SYSTEM.name())
-                .status(msg.getStatus() != null ? msg.getStatus().name() : "")
-                .timestamp(msg.getTimestamp() != null ? msg.getTimestamp().toString() : "")
-                .sender(ChatMessageResponse.UserData.builder()
-                        .userId(msg.getSender().getUserId())
-                        .username(msg.getSender().getUsername())
-                        .email(msg.getSender().getEmail())
-                        .build())
-                .receiver(ChatMessageResponse.UserData.builder()
-                        .userId(msg.getReceiver().getUserId())
-                        .username(msg.getReceiver().getUsername())
-                        .email(msg.getReceiver().getEmail())
-                        .build())
-                .build();
+        ChatMessageResponse dto = toResponseDto(msg);
+        dto.setContent("\uD83D\uDEAB This message was deleted");
+        dto.setType("SYSTEM");
+        return dto;
     }
 }

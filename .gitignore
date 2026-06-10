@@ -32,6 +32,7 @@ log/
 .env.*
 secret.properties
 credentials.json
+graphify-out
 *.key
 *.pem
 

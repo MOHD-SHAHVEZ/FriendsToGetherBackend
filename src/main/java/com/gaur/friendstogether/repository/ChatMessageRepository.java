@@ -17,6 +17,19 @@ toh hum saare ek saath load nahi karenge. Hum sirf last 20 messages uthayenge (L
 
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
+    // --- [BUG FIX]: One-to-One Chat History (Bi-directional) ---
+    // Hum m.sender.userId aur m.receiver.userId use kar rahe hain kyunki sender/receiver User Objects hain
+    @Query("""
+        SELECT m FROM ChatMessage m 
+        WHERE (m.sender.userId = :user1 AND m.receiver.userId = :user2) 
+           OR (m.sender.userId = :user2 AND m.receiver.userId = :user1) 
+        ORDER BY m.timestamp ASC
+    """)
+    List<ChatMessage> findPersonalChatHistory(
+            @Param("user1") String user1,
+            @Param("user2") String user2
+    );
+
     // --- [PERFORMANCE]: Get last X messages for a room sorted by time ---
     List<ChatMessage> findByRoomIdOrderByTimestampDesc(String roomId, Pageable pageable);
 

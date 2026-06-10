@@ -12,6 +12,7 @@ import java.time.LocalDate;
 @AllArgsConstructor
 @NoArgsConstructor
 public class UserProfileResponse {
+    private String userId;
     private String username;
     private String email;
     private String nickname;

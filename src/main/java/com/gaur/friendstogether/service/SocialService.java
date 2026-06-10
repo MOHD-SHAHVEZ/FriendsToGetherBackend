@@ -23,6 +23,7 @@ public class SocialService {
     private final UserRepository userRepository;
     private final FriendshipRepository friendshipRepository;
 
+    @Transactional(readOnly = true)
     public SocialUserResponse searchByUserId(String targetUserId, String currentUserEmail) {
         log.debug("Entering searchByUserId. targetUserId: {}, currentUserEmail: {}", targetUserId, currentUserEmail);
 
@@ -72,6 +73,7 @@ public class SocialService {
                 .level(targetUser.getProfile().getLevel())
                 .status(friendshipStatus)
                 .friendsCount(totalFriends) // --- [FRIENDS COUNT CHANGE]: Response mein set kar dena ---
+                .email(targetUser.getEmail())
                 .build();
     }
 
@@ -126,6 +128,7 @@ public class SocialService {
     // ===========================
 
     // 1. Pending Requests nikalne ke liye
+    @Transactional(readOnly = true)
     public List<SocialUserResponse> getPendingRequests(String currentUserEmail) {
         User currentUser = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -141,23 +144,25 @@ public class SocialService {
                             .avatarUrl(sender.getProfile().getAvatarUrl())
                             .level(sender.getProfile().getLevel())
                             .status("PENDING_RECEIVED")
+                            .email(sender.getEmail())
                             .build();
                 })
                 .collect(Collectors.toList());
     }
 
     // ===============================
-    // 2. Request Accept karne ke liye
-    // ===============================
+// 2. Request Accept karne ke liye (Bi-directional Fix)
+// ===============================
     @Transactional
     public String acceptFriendRequest(String senderUserId, String currentUserEmail) {
+        // 1. Receiver (User B) aur Sender (User A) dhoondo
         User receiver = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new RuntimeException("Receiver not found"));
 
         User sender = userRepository.findByUserId(senderUserId)
                 .orElseThrow(() -> new RuntimeException("Sender not found"));
 
-        // Check karo ki aisi koi pending request exist karti hai ya nahi
+        // 2. Original Pending Request (A -> B) dhoondo
         Friendship friendship = friendshipRepository.findBySenderAndReceiver(sender, receiver)
                 .orElseThrow(() -> new RuntimeException("Error: No pending request found from this user."));
 
@@ -165,13 +170,27 @@ public class SocialService {
             return "Error: Request is already " + friendship.getStatus();
         }
 
-        // Status UPDATE: PENDING -> ACCEPTED
+        // 3. Pehli Side UPDATE: (A -> B) Status = ACCEPTED
         friendship.setStatus(FriendshipStatus.ACCEPTED);
         friendshipRepository.save(friendship);
 
-        return "Success: You are now friends with " + sender.getProfile().getNickname();
-    }
+        // 4. REVERSE ENTRY: (B -> A) Create karo taaki 2-way friendship ho
+        // Pehle check karo kahi reverse entry pehle se toh nahi hai (safety check)
+        boolean reverseExists = friendshipRepository.existsBySenderAndReceiver(receiver, sender);
 
+        if (!reverseExists) {
+            Friendship reverseFriendship = Friendship.builder()
+                    .sender(receiver)    // Ab B sender ban gaya
+                    .receiver(sender)    // A receiver ban gaya
+                    .status(FriendshipStatus.ACCEPTED)
+                    .build();
+
+            friendshipRepository.save(reverseFriendship);
+            log.info("BIDIRECTIONAL_SYNC -> Reverse friendship created for {} and {}", receiver.getUserId(), sender.getUserId());
+        }
+
+        return "Success: You and " + sender.getProfile().getNickname() + " are now friends!";
+    }
     // ============================================
     // 1. Apni bheji hui request wapas lena (Cancel)
     // ============================================
@@ -214,6 +233,7 @@ public class SocialService {
     // Fetch list of my All Friends
     // 1. Mere saare Friends ki list nikalna
     // ==========================================
+    @Transactional(readOnly = true)
     public List<SocialUserResponse> getMyFriends(String currentUserEmail) {
         User currentUser = userRepository.findByEmail(currentUserEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -230,6 +250,7 @@ public class SocialService {
                     .avatarUrl(friend.getProfile().getAvatarUrl())
                     .level(friend.getProfile().getLevel())
                     .status("FRIENDS")
+                    .email(friend.getEmail())
                     .build();
         }).collect(Collectors.toList());
     }
@@ -245,11 +266,22 @@ public class SocialService {
                 .orElseThrow(() -> new RuntimeException("Friend not found"));
 
         // Dono taraf se check karna padega (A to B ya B to A)
-        Optional<Friendship> friendship = friendshipRepository.findBySenderAndReceiver(currentUser, friend)
-                .or(() -> friendshipRepository.findBySenderAndReceiver(friend, currentUser));
+        Optional<Friendship> direction1 = friendshipRepository.findBySenderAndReceiver(currentUser, friend);
+        Optional<Friendship> direction2 = friendshipRepository.findBySenderAndReceiver(friend, currentUser);
 
-        if (friendship.isPresent() && friendship.get().getStatus() == FriendshipStatus.ACCEPTED) {
-            friendshipRepository.delete(friendship.get());
+        boolean found = false;
+
+        // Delete both directions (acceptFriendRequest creates 2 rows)
+        if (direction1.isPresent() && direction1.get().getStatus() == FriendshipStatus.ACCEPTED) {
+            friendshipRepository.delete(direction1.get());
+            found = true;
+        }
+        if (direction2.isPresent() && direction2.get().getStatus() == FriendshipStatus.ACCEPTED) {
+            friendshipRepository.delete(direction2.get());
+            found = true;
+        }
+
+        if (found) {
             return "Unfriended successfully.";
         }
 
