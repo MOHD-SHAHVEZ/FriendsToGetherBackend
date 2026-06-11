@@ -4,6 +4,7 @@ import com.gaur.friendstogether.dto.request.LoginRequest;
 import com.gaur.friendstogether.dto.request.RegisterRequest;
 import com.gaur.friendstogether.dto.request.VerifyOtpRequest;
 import com.gaur.friendstogether.dto.response.AuthResponse;
+import com.gaur.friendstogether.entity.AuthProvider;
 import com.gaur.friendstogether.entity.User;
 import com.gaur.friendstogether.entity.UserProfile;
 import com.gaur.friendstogether.repository.UserRepository;
@@ -140,7 +141,11 @@ public class AuthService {
             throw new RuntimeException("Error: Please verify your email first.");
         }
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (user.getAuthProvider() != AuthProvider.LOCAL) {
+            throw new RuntimeException("Error: Please continue using your " + user.getAuthProvider() + " account.");
+        }
+
+        if (user.getPassword() == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new RuntimeException("Error: Invalid credentials.");
         }
 

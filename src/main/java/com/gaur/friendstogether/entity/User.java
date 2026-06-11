@@ -29,7 +29,7 @@ public class User {
     private String email;
 
     @com.fasterxml.jackson.annotation.JsonIgnore
-    @Column(nullable = false)
+    @Column(nullable = true)
     private String password;
 
     @com.fasterxml.jackson.annotation.JsonIgnore
@@ -39,6 +39,25 @@ public class User {
     private LocalDateTime otpExpiry;
     
     private boolean isEnabled = false;
+
+    // ==========================================
+    // OAuth 2.0 Integration Fields
+    // ==========================================
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", nullable = false)
+    @Builder.Default
+    private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    @Column(name = "provider_id")
+    private String providerId;
+
+    @PrePersist
+    @PostLoad
+    protected void ensureDefaultAuthProvider() {
+        if (this.authProvider == null) {
+            this.authProvider = AuthProvider.LOCAL;
+        }
+    }
 
     // RELATION: One-to-One with UserProfile
     // mappedBy ka matlab hai ki relation ki asli malik 'UserProfile' table hai
