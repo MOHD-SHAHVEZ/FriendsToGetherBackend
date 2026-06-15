@@ -31,6 +31,7 @@ public class AuthService {
     private final EmailService emailService;
     private final JwtUtil jwtUtil;
     private final UniqueIdGenerator idGenerator;
+    private final UserCreationService userCreationService;
 
     @Transactional
     public String register(RegisterRequest request) {
@@ -78,23 +79,9 @@ public class AuthService {
     // Helper: Naya user create karne ke liye
     private String createNewRegistration(RegisterRequest request) {
         String otp = String.format("%06d", new SecureRandom().nextInt(999999));
-        User user = User.builder()
-                .username(request.getUsername())
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .otp(otp)
-                .otpExpiry(LocalDateTime.now().plusMinutes(10))
-                .isEnabled(false)
-                .build();
-
-        UserProfile profile = UserProfile.builder()
-                .nickname(request.getUsername())
-                .level(1)
-                .user(user)
-                .build();
-        user.setProfile(profile);
-
-        userRepository.save(user);
+        String encodedPassword = passwordEncoder.encode(request.getPassword());
+        User user = userCreationService.createLocalUser(request.getUsername(), request.getEmail(), encodedPassword, otp);
+        
         emailService.sendOtpEmail(user.getEmail(), otp);
         return "Registration successful! OTP sent to your email.";
     }
