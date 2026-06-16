@@ -104,3 +104,6 @@ temp/
 # Others
 # ==================================
 HELP.md
+#REDIS_COMPLETE_GUIDE.md
+#WEBSOCKET_CHAT_TESTING_GUIDE.md
+#OAUTH2_COMPLETE_GUIDE.md
