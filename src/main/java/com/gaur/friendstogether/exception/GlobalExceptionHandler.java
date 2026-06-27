@@ -1,7 +1,12 @@
 package com.gaur.friendstogether.exception;
+
 import com.gaur.friendstogether.dto.response.ApiResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -10,6 +15,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     // 1. Hamari banayi hui ResourceNotFoundException handle karne ke liye
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -31,7 +38,29 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, ex.getStatus());
     }
 
-    // 3. Koi bhi anjaan Runtime error ke liye
+    // 3. Authentication errors (invalid/expired tokens, bad credentials)
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(AuthenticationException ex) {
+        logger.warn("[AUTH-ERROR] Authentication failed: {}", ex.getMessage());
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(false)
+                .message("Authentication failed: " + ex.getMessage())
+                .build();
+        return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+    }
+
+    // 4. Access denied (authenticated but not authorized)
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(AccessDeniedException ex) {
+        logger.warn("[AUTH-ERROR] Access denied: {}", ex.getMessage());
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(false)
+                .message("Access denied: You do not have permission to access this resource.")
+                .build();
+        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
+    }
+
+    // 5. Koi bhi anjaan Runtime error ke liye
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiResponse<Void>> handleRuntime(RuntimeException ex) {
         ApiResponse<Void> response = ApiResponse.<Void>builder()
@@ -41,9 +70,10 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
     }
 
-    // 4. Bilkul unexpected error (Server down etc.) ke liye
+    // 6. Bilkul unexpected error (Server down etc.) ke liye
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleAll(Exception ex) {
+        logger.error("[GLOBAL-ERROR] Unexpected error: {}", ex.getMessage(), ex);
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(false)
                 .message("Server Error: An unexpected error occurred.")

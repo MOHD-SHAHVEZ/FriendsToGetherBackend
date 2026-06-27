@@ -3,10 +3,9 @@ package com.gaur.friendstogether.service;
 import com.gaur.friendstogether.dto.request.LoginRequest;
 import com.gaur.friendstogether.dto.request.RegisterRequest;
 import com.gaur.friendstogether.dto.request.VerifyOtpRequest;
-import com.gaur.friendstogether.dto.response.AuthResponse;
+import com.gaur.friendstogether.dto.response.AuthTokenPair;
 import com.gaur.friendstogether.entity.AuthProvider;
 import com.gaur.friendstogether.entity.User;
-import com.gaur.friendstogether.entity.UserProfile;
 import com.gaur.friendstogether.repository.UserRepository;
 import com.gaur.friendstogether.util.JwtUtil;
 import com.gaur.friendstogether.util.UniqueIdGenerator;
@@ -32,6 +31,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final UniqueIdGenerator idGenerator;
     private final UserCreationService userCreationService;
+    private final RefreshTokenService refreshTokenService;
 
     @Transactional
     public String register(RegisterRequest request) {
@@ -119,8 +119,13 @@ public class AuthService {
         return "Account verified successfully! Your unique ID is: " + user.getUserId();
     }
 
-    // AuthService.java ka login method replace karein:
-    public AuthResponse login(LoginRequest request) {
+    /**
+     * Login — generates access token + refresh token.
+     * Returns AuthTokenPair (internal DTO) so the controller can:
+     *   - Put accessToken in response body
+     *   - Put rawRefreshToken in HttpOnly cookie
+     */
+    public AuthTokenPair login(LoginRequest request, String deviceInfo, String ipAddress) {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("Error: User not found"));
 
@@ -136,15 +141,17 @@ public class AuthService {
             throw new RuntimeException("Error: Invalid credentials.");
         }
 
-        // Generate both tokens
-        String accessToken = jwtUtil.generateToken(user.getEmail());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
+        // Generate access token
+        String accessToken = jwtUtil.generateAccessToken(user.getEmail());
 
-        return AuthResponse.builder()
+        // Generate + persist refresh token
+        String rawRefreshToken = refreshTokenService.createRefreshToken(user, deviceInfo, ipAddress);
+
+        return AuthTokenPair.builder()
                 .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .tokenType("Bearer")
+                .rawRefreshToken(rawRefreshToken)
                 .username(user.getUsername())
+                .accessTokenExpiresIn(jwtUtil.getAccessTokenExpirationSeconds())
                 .build();
     }
 }

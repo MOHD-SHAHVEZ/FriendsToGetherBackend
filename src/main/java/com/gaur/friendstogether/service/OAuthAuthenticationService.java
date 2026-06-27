@@ -1,7 +1,7 @@
 package com.gaur.friendstogether.service;
 
 import com.gaur.friendstogether.dto.OAuthSessionData;
-import com.gaur.friendstogether.dto.response.AuthResponse;
+import com.gaur.friendstogether.dto.response.AuthTokenPair;
 import com.gaur.friendstogether.entity.User;
 import com.gaur.friendstogether.repository.UserRepository;
 import com.gaur.friendstogether.util.JwtUtil;
@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -24,6 +23,7 @@ public class OAuthAuthenticationService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final RefreshTokenService refreshTokenService;
 
     public String generateAndStoreTempCode(String email, String username, String providerId, String provider) {
         String tempCode = UUID.randomUUID().toString();
@@ -36,7 +36,11 @@ public class OAuthAuthenticationService {
         return tempCode;
     }
 
-    public AuthResponse exchangeCodeForTokens(String tempCode) {
+    /**
+     * Exchange the temp code for tokens.
+     * Returns AuthTokenPair so the controller can set the refresh token as HttpOnly cookie.
+     */
+    public AuthTokenPair exchangeCodeForTokens(String tempCode, String deviceInfo, String ipAddress) {
         logger.info("[OAUTH-EXCHANGE] ===== exchangeCodeForTokens() CALLED =====");
         logger.info("[OAUTH-EXCHANGE] tempCode: {}", tempCode);
         
@@ -49,7 +53,6 @@ public class OAuthAuthenticationService {
         }
         
         logger.info("[OAUTH-EXCHANGE] Redis rawData class: {}", rawData.getClass().getName());
-        logger.info("[OAUTH-EXCHANGE] Redis rawData content: {}", rawData);
         
         // Handling conversion properly as Redis json serializer might return LinkedHashMap
         OAuthSessionData sessionData;
@@ -63,42 +66,32 @@ public class OAuthAuthenticationService {
         }
         
         logger.info("[OAUTH-EXCHANGE] Session email: '{}'", sessionData.getEmail());
-        logger.info("[OAUTH-EXCHANGE] Session username: '{}'", sessionData.getUsername());
-        logger.info("[OAUTH-EXCHANGE] Session provider: '{}'", sessionData.getProvider());
-        logger.info("[OAUTH-EXCHANGE] Session providerId: '{}'", sessionData.getProviderId());
         
         redisTemplate.delete(key);
-        
-        // DIAGNOSTIC: Check total user count and list recent users
-        long totalUsers = userRepository.count();
-        logger.info("[OAUTH-EXCHANGE] Total users in database: {}", totalUsers);
-        
-        boolean emailExists = userRepository.existsByEmail(sessionData.getEmail());
-        logger.info("[OAUTH-EXCHANGE] existsByEmail('{}') = {}", sessionData.getEmail(), emailExists);
         
         User user = userRepository.findByEmail(sessionData.getEmail())
                 .orElseThrow(() -> {
                     logger.error("[OAUTH-EXCHANGE] ===== CRITICAL FAILURE =====");
                     logger.error("[OAUTH-EXCHANGE] findByEmail('{}') returned EMPTY", sessionData.getEmail());
-                    logger.error("[OAUTH-EXCHANGE] But Redis had the session data. User was never persisted to MySQL.");
-                    logger.error("[OAUTH-EXCHANGE] Total users in DB: {}", totalUsers);
                     return new RuntimeException("Error: User not found during token exchange. Email looked up: " + sessionData.getEmail());
                 });
                 
         logger.info("[OAUTH-EXCHANGE] User FOUND — dbId: {}, email: {}, authProvider: {}", 
                 user.getId(), user.getEmail(), user.getAuthProvider());
                 
-        String accessToken = jwtUtil.generateToken(user.getEmail());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
+        // Generate access token
+        String accessToken = jwtUtil.generateAccessToken(user.getEmail());
+
+        // Generate + persist refresh token
+        String rawRefreshToken = refreshTokenService.createRefreshToken(user, deviceInfo, ipAddress);
         
-        logger.info("[OAUTH-EXCHANGE] JWT tokens generated successfully for: {}", user.getEmail());
-        logger.info("[OAUTH-EXCHANGE] ===== exchangeCodeForTokens() COMPLETED =====");
+        logger.info("[OAUTH-EXCHANGE] Tokens generated successfully for: {}", user.getEmail());
         
-        return AuthResponse.builder()
+        return AuthTokenPair.builder()
                 .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .tokenType("Bearer")
+                .rawRefreshToken(rawRefreshToken)
                 .username(user.getUsername())
+                .accessTokenExpiresIn(jwtUtil.getAccessTokenExpirationSeconds())
                 .build();
     }
 }

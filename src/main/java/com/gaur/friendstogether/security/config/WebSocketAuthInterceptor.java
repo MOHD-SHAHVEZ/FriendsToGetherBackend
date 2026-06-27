@@ -53,7 +53,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                 String email = jwtUtil.getEmailFromToken(token);
                 log.info("📧 [WS-AUTH] Token se email nikala: {}", email);
 
-                if (email != null && jwtUtil.validateToken(token)) {
+                if (email != null && jwtUtil.validateAccessToken(token)) {
                     UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
                     UsernamePasswordAuthenticationToken authToken =
