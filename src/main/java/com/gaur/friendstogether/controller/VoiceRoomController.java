@@ -350,7 +350,8 @@ public class VoiceRoomController {
 
     /**
      * FEATURE 5: Room Settings
-     * Owner can update room title, password, maxSeat, category.
+     * Owner can update room title, password, maxSeat, category currently not completely implemented
+     * some features are still pending so review the code.
      */
     @PutMapping("/settings")
     public ResponseEntity<ApiResponse<Map<String, Object>>> updateRoomSettings(
