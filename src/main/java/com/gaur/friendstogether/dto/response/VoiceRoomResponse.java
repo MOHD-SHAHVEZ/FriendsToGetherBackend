@@ -45,4 +45,14 @@ public class VoiceRoomResponse {
 
     // Room creation time (sorting / recency ke liye)
     private LocalDateTime createdAt;
+
+    // Personal room flag (UI ke liye — personal vs public distinction)
+    @com.fasterxml.jackson.annotation.JsonProperty("isPersonal")
+    private boolean isPersonal;
+
+    // Maximum seats in the room
+    private int maxSeat;
+
+    // Room status (ACTIVE / CLOSED)
+    private com.gaur.friendstogether.entity.RoomStatus status;
 }

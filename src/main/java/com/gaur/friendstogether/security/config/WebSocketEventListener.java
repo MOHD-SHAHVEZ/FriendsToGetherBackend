@@ -1,5 +1,10 @@
 package com.gaur.friendstogether.security.config;
 
+import com.gaur.friendstogether.entity.User;
+import com.gaur.friendstogether.entity.VoiceRoom;
+import com.gaur.friendstogether.repository.RoomMemberRepository;
+import com.gaur.friendstogether.repository.UserRepository;
+import com.gaur.friendstogether.service.VoiceRoomService;
 import com.gaur.friendstogether.dto.response.PresenceEvent;
 import com.gaur.friendstogether.service.ChatService;
 import com.gaur.friendstogether.service.PresenceService;
@@ -12,6 +17,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+import java.util.List;
+import java.util.Optional;
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -20,6 +28,11 @@ public class WebSocketEventListener {
     private final ChatService chatService;
     private final PresenceService presenceService;
     private final SimpMessagingTemplate messagingTemplate;
+    
+    // Injected to handle automatic room leave on disconnect
+    private final VoiceRoomService voiceRoomService;
+    private final UserRepository userRepository;
+    private final RoomMemberRepository roomMemberRepository;
 
     /**
      * Fires on successful STOMP CONNECTED acknowledgment.
@@ -50,7 +63,8 @@ public class WebSocketEventListener {
         messagingTemplate.convertAndSend("/topic/status", presenceEvent);
         log.info("[WS] Presence event broadcast: {} → ONLINE", userEmail);
 
-        // 3. Deliver pending offline messages (wrapped in try-catch to prevent cascade failure)
+        // 3. Deliver pending offline messages (wrapped in try-catch to prevent cascade
+        // failure)
         try {
             log.info("[WS] Triggering offline message delivery for: {}", userEmail);
             chatService.deliverPendingMessages(userEmail);
@@ -65,6 +79,9 @@ public class WebSocketEventListener {
      * 1. Updates Redis presence → OFFLINE
      * 2. Broadcasts presence event globally
      */
+
+    // Voice room websocket check the owner is present in room or room status is
+    // online or offline
     @EventListener
     public void handleWebSocketDisconnectListener(SessionDisconnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
@@ -87,5 +104,20 @@ public class WebSocketEventListener {
                 .build();
         messagingTemplate.convertAndSend("/topic/status", presenceEvent);
         log.info("[WS] Presence event broadcast: {} → OFFLINE", userEmail);
+
+        // 3. Automatically leave active voice rooms
+        try {
+            Optional<User> optionalUser = userRepository.findByEmail(userEmail);
+            if (optionalUser.isPresent()) {
+                User user = optionalUser.get();
+                List<VoiceRoom> activeRooms = roomMemberRepository.findActiveRoomsByUser(user);
+                for (VoiceRoom room : activeRooms) {
+                    log.info("[WS] Auto-leaving room '{}' for disconnected user '{}'", room.getRoomId(), userEmail);
+                    voiceRoomService.leaveRoom(room.getRoomId(), user);
+                }
+            }
+        } catch (Exception e) {
+            log.error("[WS] Error while auto-leaving rooms for user '{}': {}", userEmail, e.getMessage(), e);
+        }
     }
 }

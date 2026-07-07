@@ -34,7 +34,7 @@ public class RoomModerationLog {
     private User target;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, length = 50)
     private ModerationAction action;
 
     private String reason;

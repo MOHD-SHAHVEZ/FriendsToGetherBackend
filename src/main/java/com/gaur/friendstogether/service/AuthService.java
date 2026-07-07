@@ -32,6 +32,7 @@ public class AuthService {
     private final UniqueIdGenerator idGenerator;
     private final UserCreationService userCreationService;
     private final RefreshTokenService refreshTokenService;
+    private final VoiceRoomService voiceRoomService;
 
     @Transactional
     public String register(RegisterRequest request) {
@@ -115,6 +116,13 @@ public class AuthService {
         }
 
         userRepository.save(user);
+
+        // Auto-allocate personal room upon successful verification
+        try {
+            voiceRoomService.allocatePersonalRoom(user);
+        } catch (Exception e) {
+            logger.error("Failed to allocate personal room for user {}: {}", user.getUsername(), e.getMessage());
+        }
 
         return "Account verified successfully! Your unique ID is: " + user.getUserId();
     }

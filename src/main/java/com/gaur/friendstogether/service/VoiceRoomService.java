@@ -1,6 +1,8 @@
 package com.gaur.friendstogether.service;
 
 import com.gaur.friendstogether.dto.request.RoleChangeRequest;
+import com.gaur.friendstogether.dto.request.RoomPasswordRequest;
+import com.gaur.friendstogether.dto.request.RoomSettingsRequest;
 import com.gaur.friendstogether.dto.request.VoiceRoomRequest;
 import com.gaur.friendstogether.dto.response.RoomMemberResponse;
 import com.gaur.friendstogether.dto.response.VoiceRoomResponse;
@@ -19,6 +21,7 @@ import org.springframework.data.domain.Sort;
 import com.gaur.friendstogether.dto.response.ModerationLogResponse;
 import com.gaur.friendstogether.util.AppUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -44,6 +47,7 @@ public class VoiceRoomService {
     private final RoomBlacklistRepository roomBlacklistRepository;
     private final UserRepository userRepository;
     private final RoomModerationLogRepository roomModerationLogRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
     /**
      * Naya Voice Room create karne ka liye.
@@ -198,6 +202,12 @@ public class VoiceRoomService {
             voiceRoomRepository.updateMemberCount(room.getId(), 1);
             log.info("COUNT_INC -> Room: {}, User: {}", roomId, user.getUserId());
         }
+        
+        if (room.getStatus() == RoomStatus.CLOSED) {
+            room.setStatus(RoomStatus.ACTIVE);
+            voiceRoomRepository.save(room);
+            log.info("Room '{}' became ACTIVE upon user join", roomId);
+        }
 
 // ============================================================================================
 //        4. Capacity Check -> ya code maximum peoples 10 aa sakta hai room ma uska liya restriction tha iski jarurt nahi
@@ -235,7 +245,7 @@ public class VoiceRoomService {
         // 3. IDEMPOTENCY: Agar user pehle hi ja chuka hai, toh chill maaro (Success return karo)
         if (!member.isActive()) {
             log.info("Idempotent Leave: User '{}' had already left room '{}'", user.getUserId(), roomId);
-            return buildLeaveResponse(roomId, "ALREADY_LEFT", room.getStatus());
+            return buildLeaveResponse(roomId, "ALREADY_LEFT", room.getStatus(), user, 0, null);
         }
 
         // 4. Current User ka Exit mark karo
@@ -249,34 +259,105 @@ public class VoiceRoomService {
         voiceRoomRepository.updateMemberCount(room.getId(), -1);
         log.info("COUNT_DEC -> Room: {}, User: {}", roomId, user.getUserId());
 
-        // 5. OWNER & TEMP ROOM LOGIC
+        // 5. OWNER & ROOM LOGIC
         boolean isOwner = room.getOwner() != null && java.util.Objects.equals(room.getOwner().getId(), user.getId());
+        String newHostUserId = null;
+        String newHostUsername = null;
 
-        if (isOwner && !room.isPersonal()) {
-            // Temporary room hai aur Owner chhod raha hai -> Room band karo
-            room.setStatus(RoomStatus.CLOSED);
+        if (isOwner) {
+            if (!room.isPersonal()) {
+                // PUBLIC/TEMPORARY ROOM: Owner leaving -> ALWAYS destroy the room
+                // No ownership transfer — public rooms are temporary, creator leaving = room dies
+                room.setStatus(RoomStatus.CLOSED);
+                room.setCurrentMemberCount(0);
+                voiceRoomRepository.save(room);
 
-            // Room band hote waqt count seedha 0 kar do kyunki sab nikal rahe hain
-            room.setCurrentMemberCount(0);
-            voiceRoomRepository.save(room);
+                // Sabhi remaining members ko ek saath bahar nikalo (Bulk Update)
+                roomMemberRepository.deactivateAllByRoom(room, now);
+                log.info("Owner left: Public Room '{}' destroyed and all members deactivated.", roomId);
+            } else {
+                // PERSONAL ROOM: Owner leaving -> Check if any OWNER/ADMIN remains
+                boolean hasLeadership = roomMemberRepository.existsActiveOwnerOrAdmin(room, user);
 
-            // Sabhi members ko ek saath bahar nikalo (Bulk Update)
-            roomMemberRepository.deactivateAllByRoom(room, now);
-            log.info("Owner left: Temporary Room '{}' closed and all members deactivated.", roomId);
+                if (hasLeadership) {
+                    // Rule 1: At least one Owner/Admin remains — room stays ACTIVE
+                    log.info("Owner left: Personal Room '{}' stays ACTIVE — Owner/Admin still present.", roomId);
+                    // Room status remains ACTIVE, no member deactivation needed
+                } else {
+                    // Rule 2: No Owner/Admin remains — close the room and remove everyone
+                    room.setStatus(RoomStatus.CLOSED);
+                    room.setCurrentMemberCount(0);
+                    voiceRoomRepository.save(room);
+
+                    // Sabhi members ko ek saath bahar nikalo (Bulk Update)
+                    roomMemberRepository.deactivateAllByRoom(room, now);
+                    log.info("Owner left: Personal Room '{}' went offline and all members deactivated (no Owner/Admin remaining).", roomId);
+                }
+            }
         }
+
+        // Audit log for leave
+        logModerationAction(room, user, user, ModerationAction.LEAVE, "User left the room");
+
+        // 6. Get remaining active member count for broadcast
+        long remainingPlayers = roomMemberRepository.countByRoomAndIsActiveTrue(room);
 
         log.info("User '{}' successfully left room '{}'", user.getUserId(), roomId);
 
-        // 6. Return Clean Response
-        return buildLeaveResponse(roomId, "LEFT_SUCCESSFULLY", room.getStatus());
+        // 7. WEBSOCKET BROADCASTS (after transaction completes, best-effort)
+        try {
+            // 7a. Broadcast ROOM_PLAYER_LEFT to all remaining members
+            Map<String, Object> playerLeftPayload = new LinkedHashMap<>();
+            playerLeftPayload.put("event", "ROOM_PLAYER_LEFT");
+            playerLeftPayload.put("roomId", roomId);
+            playerLeftPayload.put("userId", user.getUserId());
+            playerLeftPayload.put("username", user.getUsername());
+            playerLeftPayload.put("remainingPlayers", remainingPlayers);
+            messagingTemplate.convertAndSend("/topic/room." + roomId, (Object) playerLeftPayload);
+            log.info("WS_BROADCAST -> ROOM_PLAYER_LEFT for room '{}', user '{}'", roomId, user.getUserId());
+
+            // 7b. If host changed, broadcast ROOM_HOST_CHANGED
+            if (newHostUserId != null) {
+                Map<String, Object> hostChangedPayload = new LinkedHashMap<>();
+                hostChangedPayload.put("event", "ROOM_HOST_CHANGED");
+                hostChangedPayload.put("roomId", roomId);
+                hostChangedPayload.put("newHostUserId", newHostUserId);
+                hostChangedPayload.put("newHostUsername", newHostUsername);
+                messagingTemplate.convertAndSend("/topic/room." + roomId, (Object) hostChangedPayload);
+                log.info("WS_BROADCAST -> ROOM_HOST_CHANGED for room '{}', newHost '{}'", roomId, newHostUserId);
+            }
+
+            // 7c. If room closed, broadcast ROOM_CLOSED
+            if (room.getStatus() == RoomStatus.CLOSED) {
+                Map<String, Object> closedPayload = new LinkedHashMap<>();
+                closedPayload.put("event", "ROOM_CLOSED");
+                closedPayload.put("roomId", roomId);
+                closedPayload.put("reason", isOwner ? "Owner left the room" : "Room closed");
+                messagingTemplate.convertAndSend("/topic/room." + roomId, (Object) closedPayload);
+                log.info("WS_BROADCAST -> ROOM_CLOSED for room '{}'", roomId);
+            }
+        } catch (Exception e) {
+            // WebSocket broadcast failure should NOT fail the leave operation
+            log.error("WS_BROADCAST_FAILED -> Room: {}, Error: {}", roomId, e.getMessage(), e);
+        }
+
+        // 8. Return Clean Response
+        return buildLeaveResponse(roomId, "LEFT_SUCCESSFULLY", room.getStatus(), user, remainingPlayers, newHostUserId);
     }
 
     // Helper method taaki code clean rahe
-    private Map<String, Object> buildLeaveResponse(String roomId, String status, RoomStatus roomStatus) {
+    private Map<String, Object> buildLeaveResponse(String roomId, String status, RoomStatus roomStatus,
+                                                    User user, long remainingPlayers, String newHostUserId) {
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("roomId", roomId);
         response.put("status", status);
         response.put("roomStatus", roomStatus);
+        response.put("userId", user.getUserId());
+        response.put("username", user.getUsername());
+        response.put("remainingPlayers", remainingPlayers);
+        if (newHostUserId != null) {
+            response.put("newHostUserId", newHostUserId);
+        }
         return response;
     }
 
@@ -775,6 +856,8 @@ public class VoiceRoomService {
 
     /**
      * SEARCH: Room ID se exact match (With Trim & Safety)
+     * BUG FIX: Personal rooms CLOSED state mein bhi search ho sakti hain Room ID se.
+     * Public rooms ko CLOSED state mein search nahi karna (temporary rooms hain).
      */
     @Transactional(readOnly = true)
     public VoiceRoomResponse searchRoomById(String roomId) {
@@ -783,8 +866,13 @@ public class VoiceRoomService {
         String cleanRoomId = roomId.trim(); // Team Lead Suggestion: Trim spaces
         log.info("SERVICE_SEARCH -> RoomID: {}", cleanRoomId);
 
-        VoiceRoom room = voiceRoomRepository.findByRoomIdAndStatus(cleanRoomId, RoomStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessLogicException("Room not found or is closed!", HttpStatus.NOT_FOUND));
+        VoiceRoom room = voiceRoomRepository.findByRoomId(cleanRoomId)
+                .orElseThrow(() -> new BusinessLogicException("Room not found!", HttpStatus.NOT_FOUND));
+
+        // Public rooms jo CLOSED hain wo search mein nahi dikhni chahiye (temporary rooms hain)
+        if (!room.isPersonal() && room.getStatus() == RoomStatus.CLOSED) {
+            throw new BusinessLogicException("Room not found or is closed!", HttpStatus.NOT_FOUND);
+        }
 
         return convertToDto(room);
     }
@@ -817,16 +905,226 @@ public class VoiceRoomService {
                 .isLocked(room.isLocked())
                 .category(room.getCategory())
                 .createdAt(room.getCreatedAt())
+                .isPersonal(room.isPersonal())
+                .maxSeat(room.getMaxSeat())
+                .status(room.getStatus())
                 .build();
     }
 
-    /**
-     * Fetch the personal room for a specific user Added by Antigravity to Get the Owner own Room.
-     */
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    @org.springframework.transaction.annotation.Transactional
     public VoiceRoomResponse getPersonalRoom(com.gaur.friendstogether.entity.User owner) {
         return voiceRoomRepository.findByOwnerAndIsPersonalTrue(owner)
                 .map(this::convertToDto)
-                .orElse(null);
+                .orElseGet(() -> {
+                    log.info("No personal room found for User '{}'. Auto-allocating one now.", owner.getUsername());
+                    VoiceRoom newRoom = allocatePersonalRoom(owner);
+                    return convertToDto(newRoom);
+                });
     }
-}
+
+    /**
+     * Helper: Allocates a private room for a user in 'CLOSED' (Offline) state.
+     * This is used during auto-allocation (Registration) or Lazy initialization.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public VoiceRoom allocatePersonalRoom(com.gaur.friendstogether.entity.User owner) {
+        // Double check to prevent duplicates
+        return voiceRoomRepository.findByOwnerAndIsPersonalTrue(owner).orElseGet(() -> {
+            String roomId = AppUtils.generateRoomId();
+            int attempts = 0;
+            while (voiceRoomRepository.existsByRoomId(roomId)) {
+                if (attempts++ > 5) {
+                    throw new BusinessLogicException("Server Busy: Could not generate unique Room ID", org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR);
+                }
+                roomId = AppUtils.generateRoomId();
+            }
+
+            VoiceRoom room = VoiceRoom.builder()
+                    .roomId(roomId)
+                    .title(owner.getUsername() + "'s Private Room")
+                    .isLocked(false)
+                    .isPersonal(true)
+                    .maxSeat(10)
+                    .owner(owner)
+                    .ownerUserId(owner.getUserId())
+                    .status(RoomStatus.CLOSED) // Starts offline
+                    .currentMemberCount(0)
+                    .build();
+
+            VoiceRoom savedRoom = voiceRoomRepository.save(room);
+
+            // Add owner as member but INACTIVE (since they haven't joined yet)
+            com.gaur.friendstogether.entity.RoomMember ownerMember = com.gaur.friendstogether.entity.RoomMember.builder()
+                    .room(savedRoom)
+                    .user(owner)
+                    .userIdString(owner.getUserId())
+                    .roomIdString(savedRoom.getRoomId())
+                    .role(com.gaur.friendstogether.entity.RoomRole.OWNER)
+                    .isActive(false)
+                    .build();
+            roomMemberRepository.save(ownerMember);
+
+            log.info("Successfully allocated private offline room '{}' for user '{}'", roomId, owner.getUsername());
+            return savedRoom;
+        });
+    }
+
+    // =====================================================================================
+    // FEATURE 1: Owner Controlled Password Management
+    // =====================================================================================
+
+    /**
+     * Room ka password enable/disable/update karna.
+     * Sirf Owner ke paas ye power hai.
+     */
+    @Transactional
+    public Map<String, Object> updateRoomPassword(RoomPasswordRequest request, User actor) {
+        String roomId = request.getRoomId().trim();
+        log.info("PASSWORD_UPDATE -> Actor: {}, Room: {}, Enabled: {}", actor.getUserId(), roomId, request.isEnabled());
+
+        // 1. Room fetch karo
+        VoiceRoom room = voiceRoomRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new BusinessLogicException("Room not found!", HttpStatus.NOT_FOUND));
+
+        // 2. Owner check karo (Sirf owner hi password manage karega)
+        if (!Objects.equals(room.getOwner().getId(), actor.getId())) {
+            throw new BusinessLogicException("Permission denied: Only the room owner can manage passwords!", HttpStatus.FORBIDDEN);
+        }
+
+        // 3. Room ACTIVE hona chahiye
+        if (room.getStatus() == RoomStatus.CLOSED) {
+            throw new BusinessLogicException("Cannot update password: Room is closed!", HttpStatus.GONE);
+        }
+
+        // 4. Password logic
+        if (request.isEnabled()) {
+            // ENABLE or UPDATE password
+            if (request.getPassword() == null || request.getPassword().isBlank()) {
+                throw new BusinessLogicException("Password is required when enabling password protection!", HttpStatus.BAD_REQUEST);
+            }
+            room.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            room.setLocked(true);
+            log.info("PASSWORD_ENABLED -> Room: {}", roomId);
+        } else {
+            // DISABLE password
+            room.setPasswordHash(null);
+            room.setLocked(false);
+            log.info("PASSWORD_DISABLED -> Room: {}", roomId);
+        }
+
+        voiceRoomRepository.save(room);
+
+        // 5. Audit log
+        String action = request.isEnabled() ? "Password enabled/updated" : "Password disabled";
+        logModerationAction(room, actor, actor, ModerationAction.PASSWORD_UPDATE, action);
+
+        // 6. Response
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("roomId", roomId);
+        response.put("isLocked", room.isLocked());
+        response.put("action", request.isEnabled() ? "PASSWORD_ENABLED" : "PASSWORD_DISABLED");
+        response.put("updatedBy", actor.getUserId());
+        response.put("timestamp", LocalDateTime.now());
+        return response;
+    }
+
+    // =====================================================================================
+    // FEATURE 5: Room Settings Update
+    // =====================================================================================
+
+    /**
+     * Room ki settings update karna (Partial Update supported).
+     * Sirf Owner ke paas ye power hai.
+     */
+    @Transactional
+    public Map<String, Object> updateRoomSettings(RoomSettingsRequest request, User actor) {
+        String roomId = request.getRoomId().trim();
+        log.info("SETTINGS_UPDATE -> Actor: {}, Room: {}", actor.getUserId(), roomId);
+
+        // 1. Room fetch karo
+        VoiceRoom room = voiceRoomRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new BusinessLogicException("Room not found!", HttpStatus.NOT_FOUND));
+
+        // 2. Owner check karo
+        if (!Objects.equals(room.getOwner().getId(), actor.getId())) {
+            throw new BusinessLogicException("Permission denied: Only the room owner can update settings!", HttpStatus.FORBIDDEN);
+        }
+
+        // 3. Room ACTIVE hona chahiye
+        if (room.getStatus() == RoomStatus.CLOSED) {
+            throw new BusinessLogicException("Cannot update settings: Room is closed!", HttpStatus.GONE);
+        }
+
+        // 4. Partial Update: Sirf provided fields update honge
+        List<String> updatedFields = new ArrayList<>();
+
+        // 4a. Title update
+        if (request.getTitle() != null && !request.getTitle().isBlank()) {
+            room.setTitle(request.getTitle().trim());
+            updatedFields.add("title");
+        }
+
+        // 4b. MaxSeat update
+        if (request.getMaxSeat() != null) {
+            room.setMaxSeat(request.getMaxSeat());
+            updatedFields.add("maxSeat");
+        }
+
+        // 4c. Category update
+        if (request.getCategory() != null) {
+            room.setCategory(request.getCategory());
+            updatedFields.add("category");
+        }
+
+        // 4d. Password/Lock update (Complex logic)
+        if (request.getIsLocked() != null) {
+            if (request.getIsLocked()) {
+                // Enable password protection
+                if (request.getPassword() != null && !request.getPassword().isBlank()) {
+                    room.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+                } else if (room.getPasswordHash() == null || room.getPasswordHash().isBlank()) {
+                    // No existing password and no new password provided
+                    throw new BusinessLogicException("Password is required when enabling lock!", HttpStatus.BAD_REQUEST);
+                }
+                // If password already exists and no new one provided, keep existing password
+                room.setLocked(true);
+                updatedFields.add("isLocked");
+            } else {
+                // Disable password protection
+                room.setPasswordHash(null);
+                room.setLocked(false);
+                updatedFields.add("isLocked");
+            }
+        } else if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            // Password provided without explicit lock change -> update password if room is already locked
+            if (room.isLocked()) {
+                room.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+                updatedFields.add("password");
+            } else {
+                throw new BusinessLogicException("Room is not locked. Set isLocked=true to enable password protection.", HttpStatus.BAD_REQUEST);
+            }
+        }
+
+        // 5. Kuch toh update hua hona chahiye
+        if (updatedFields.isEmpty()) {
+            throw new BusinessLogicException("No valid fields provided for update!", HttpStatus.BAD_REQUEST);
+        }
+
+        voiceRoomRepository.save(room);
+
+        // 6. Audit log
+        String reason = "Settings updated: " + String.join(", ", updatedFields);
+        logModerationAction(room, actor, actor, ModerationAction.SETTINGS_UPDATE, reason);
+
+        log.info("SETTINGS_UPDATED -> Room: {}, Fields: {}", roomId, updatedFields);
+
+        // 7. Response with updated room data
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("roomId", roomId);
+        response.put("updatedFields", updatedFields);
+        response.put("roomDetails", convertToDto(room));
+        response.put("updatedBy", actor.getUserId());
+        response.put("timestamp", LocalDateTime.now());
+        return response;
+    }
+}

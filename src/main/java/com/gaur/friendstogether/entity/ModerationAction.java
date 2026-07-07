@@ -7,5 +7,9 @@ public enum ModerationAction {
     PROMOTE,
     DEMOTE,
     MUTE,
-    UNMUTE
+    UNMUTE,
+    LEAVE,
+    HOST_TRANSFER,
+    PASSWORD_UPDATE,
+    SETTINGS_UPDATE
 }

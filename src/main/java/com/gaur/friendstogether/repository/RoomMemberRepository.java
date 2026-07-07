@@ -85,4 +85,40 @@ public interface RoomMemberRepository extends JpaRepository<RoomMember, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT rm FROM RoomMember rm WHERE rm.room = :room AND rm.user = :user")
     Optional<RoomMember> findByRoomAndUserWithLock(@Param("room") VoiceRoom room, @Param("user") User user);
+
+    /**
+     * 8. HOST TRANSFER: Find the next best candidate for room ownership.
+     * Priority: ADMIN first, then MEMBER, ordered by join time (seniority).
+     * Excludes the leaving user from candidates.
+     */
+    @Query("""
+        SELECT rm FROM RoomMember rm 
+        WHERE rm.room = :room AND rm.isActive = true AND rm.user != :excludeUser 
+        ORDER BY 
+            CASE rm.role 
+                WHEN com.gaur.friendstogether.entity.RoomRole.ADMIN THEN 1 
+                ELSE 2 
+            END ASC, 
+            rm.joinedAt ASC
+    """)
+    List<RoomMember> findHostCandidates(@Param("room") VoiceRoom room, @Param("excludeUser") User excludeUser);
+
+    /**
+     * 9. PERSONAL ROOM EXIT CHECK: Kya room mein koi OWNER ya ADMIN baaqi hai?
+     * Owner leaving ke waqt personal room ko band karna hai ya nahi — yahi decide karega.
+     */
+    @Query("""
+        SELECT CASE WHEN COUNT(rm) > 0 THEN true ELSE false END 
+        FROM RoomMember rm 
+        WHERE rm.room = :room AND rm.isActive = true AND rm.user != :excludeUser 
+        AND (rm.role = com.gaur.friendstogether.entity.RoomRole.OWNER OR rm.role = com.gaur.friendstogether.entity.RoomRole.ADMIN)
+    """)
+    boolean existsActiveOwnerOrAdmin(@Param("room") VoiceRoom room, @Param("excludeUser") User excludeUser);
+
+    /**
+     * Finds all active rooms for a user.
+     * Useful for disconnecting users from rooms on WebSocket disconnect.
+     */
+    @Query("SELECT rm.room FROM RoomMember rm WHERE rm.user = :user AND rm.isActive = true")
+    List<VoiceRoom> findActiveRoomsByUser(@Param("user") User user);
 }

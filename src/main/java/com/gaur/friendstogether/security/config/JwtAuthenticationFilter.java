@@ -1,6 +1,7 @@
 package com.gaur.friendstogether.security.config;
 
 import com.gaur.friendstogether.util.JwtUtil;
+import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -64,6 +65,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
             }
+        } catch (ExpiredJwtException e) {
+            // Token is specifically expired — flag it so the entry point can signal the frontend
+            request.setAttribute("jwt-expired", true);
+            logger.warn("[JWT-FILTER] Access token expired for request {} — subject: {}",
+                    request.getRequestURI(), e.getClaims().getSubject());
         } catch (Exception e) {
             // Do NOT throw — let the filter chain continue so Spring Security
             // can handle the unauthenticated request via AuthenticationEntryPoint

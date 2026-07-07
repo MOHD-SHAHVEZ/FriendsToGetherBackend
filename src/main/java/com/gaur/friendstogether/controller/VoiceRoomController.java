@@ -1,6 +1,8 @@
 package com.gaur.friendstogether.controller;
 
 import com.gaur.friendstogether.dto.request.RoleChangeRequest;
+import com.gaur.friendstogether.dto.request.RoomPasswordRequest;
+import com.gaur.friendstogether.dto.request.RoomSettingsRequest;
 import com.gaur.friendstogether.dto.response.ApiResponse;
 import com.gaur.friendstogether.dto.request.VoiceRoomRequest;
 import com.gaur.friendstogether.dto.response.ModerationLogResponse;
@@ -316,6 +318,58 @@ public class VoiceRoomController {
                         .success(true)
                         .message(response != null ? "Personal room found" : "No personal room found")
                         .data(response)
+                        .build()
+        );
+    }
+
+    /**
+     * FEATURE 1: Password Management
+     * Owner can enable, disable, or update room password.
+     */
+    @PutMapping("/password")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateRoomPassword(
+            @Valid @RequestBody RoomPasswordRequest request,
+            Authentication authentication
+    ) {
+        String email = authentication.getName();
+        User actor = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        log.info("API_PASSWORD_UPDATE -> Room: {}, Actor: {}", request.getRoomId(), actor.getUserId());
+
+        Map<String, Object> result = voiceRoomService.updateRoomPassword(request, actor);
+
+        return ResponseEntity.ok(
+                ApiResponse.<Map<String, Object>>builder()
+                        .success(true)
+                        .message("Room password updated successfully")
+                        .data(result)
+                        .build()
+        );
+    }
+
+    /**
+     * FEATURE 5: Room Settings
+     * Owner can update room title, password, maxSeat, category.
+     */
+    @PutMapping("/settings")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateRoomSettings(
+            @Valid @RequestBody RoomSettingsRequest request,
+            Authentication authentication
+    ) {
+        String email = authentication.getName();
+        User actor = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        log.info("API_SETTINGS_UPDATE -> Room: {}, Actor: {}", request.getRoomId(), actor.getUserId());
+
+        Map<String, Object> result = voiceRoomService.updateRoomSettings(request, actor);
+
+        return ResponseEntity.ok(
+                ApiResponse.<Map<String, Object>>builder()
+                        .success(true)
+                        .message("Room settings updated successfully")
+                        .data(result)
                         .build()
         );
     }

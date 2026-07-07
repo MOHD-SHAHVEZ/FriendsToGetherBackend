@@ -37,10 +37,20 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 
+        // Check if the token was specifically expired (set by JwtAuthenticationFilter)
+        boolean isTokenExpired = Boolean.TRUE.equals(request.getAttribute("jwt-expired"));
+        String message = "Authentication required. Please log in.";
+
+        if (isTokenExpired) {
+            response.setHeader("X-Token-Expired", "true");
+            message = "Access token expired. Please refresh your token.";
+            logger.info("[AUTH] Token expired — X-Token-Expired header set for URI: {}", request.getRequestURI());
+        }
+
         Map<String, Object> body = Map.of(
                 "status", 401,
                 "error", "Unauthorized",
-                "message", "Authentication required. Please log in.",
+                "message", message,
                 "path", request.getRequestURI(),
                 "timestamp", Instant.now().toString()
         );

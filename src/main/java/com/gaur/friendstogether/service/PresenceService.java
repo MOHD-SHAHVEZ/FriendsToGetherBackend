@@ -1,3 +1,5 @@
+// check presence status for voice room Member! 
+
 package com.gaur.friendstogether.service;
 
 import lombok.RequiredArgsConstructor;
@@ -26,7 +28,8 @@ public class PresenceService {
             stringRedisTemplate.opsForSet().add(ONLINE_USERS_KEY, email);
             log.debug("[REDIS] SADD {} → {}", ONLINE_USERS_KEY, email);
         } catch (Exception e) {
-            log.warn("[REDIS] Failure during userOnline for '{}'. Falling back to in-memory. Error: {}", email, e.getMessage());
+            log.warn("[REDIS] Failure during userOnline for '{}'. Falling back to in-memory. Error: {}", email,
+                    e.getMessage());
         }
     }
 
@@ -47,7 +50,8 @@ public class PresenceService {
             log.debug("[REDIS] SISMEMBER {} {} → {}", ONLINE_USERS_KEY, email, result);
             return result;
         } catch (Exception e) {
-            log.warn("[REDIS] Unreachable. Falling back to SimpUserRegistry for '{}'. Error: {}", email, e.getMessage());
+            log.warn("[REDIS] Unreachable. Falling back to SimpUserRegistry for '{}'. Error: {}", email,
+                    e.getMessage());
             return simpUserRegistry.getUser(email) != null;
         }
     }
