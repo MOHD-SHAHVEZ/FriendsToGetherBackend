@@ -48,7 +48,17 @@ import java.time.LocalDateTime;
 
                 @Index(name = "idx_coin_order_number", columnList = "order_number", unique = true),
 
-                @Index(name = "idx_coin_order_status", columnList = "status")
+                @Index(name = "idx_coin_order_status", columnList = "status"),
+
+                /**
+                 * Scheduler: find expired CREATED orders efficiently.
+                 */
+                @Index(name = "idx_coin_order_expires", columnList = "status, expires_at"),
+
+                /**
+                 * Pending order check: find active orders per user quickly.
+                 */
+                @Index(name = "idx_coin_order_user_status", columnList = "user_id, status")
         }
 )
 @Getter
@@ -163,6 +173,40 @@ public class CoinOrder {
      */
     @Column(length = 500)
     private String remarks;
+
+    // ===========================================================
+    // ORDER EXPIRY
+    // ===========================================================
+
+    /**
+     * When this order auto-expires.
+     *
+     * Default: 30 minutes after creation.
+     *
+     * Scheduler runs every 5 minutes and marks
+     * CREATED orders as EXPIRED if expiresAt has passed.
+     *
+     * This matches Razorpay's default order validity.
+     */
+    @Column(name = "expires_at")
+    private LocalDateTime expiresAt;
+
+    // ===========================================================
+    // OPTIMISTIC LOCKING
+    // ===========================================================
+
+    /**
+     * Prevents concurrent status update corruption.
+     *
+     * Example:
+     * Webhook says PAYMENT_SUCCESS at the same time
+     * scheduler tries to mark EXPIRED.
+     *
+     * @Version ensures only one update wins.
+     * The other gets OptimisticLockException and retries.
+     */
+    @Version
+    private Long version;
 
     /**
      * Record Creation Time
