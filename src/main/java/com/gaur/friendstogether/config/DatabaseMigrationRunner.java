@@ -6,6 +6,8 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import org.springframework.core.annotation.Order;
+
 /**
  * Migration runner that executes on application startup.
  * Safely migrates existing user rows that lack an auth_provider
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@Order(1)
 public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private final JdbcTemplate jdbcTemplate;
@@ -23,6 +26,8 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         log.info("Running database migrations...");
         migrateAuthProvider();
         migratePasswordColumnNullable();
+        migrateWalletTransactionsEnums();
+        migrateWalletTransactionsDropUserId();
     }
 
     /**
@@ -62,6 +67,43 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         } catch (Exception e) {
             log.error("Failed to alter password column: {}", e.getMessage());
             // Non-fatal: if already nullable, some MySQL versions may throw. Safe to continue.
+        }
+    }
+
+    /**
+     * Migration 3: Fix ENUM truncation errors in wallet_transactions by converting them to VARCHAR(255).
+     * Hibernate ddl-auto=update does not reliably update ENUM column definitions in MySQL
+     * when new enum values (like WELCOME_BONUS) are added.
+     */
+    private void migrateWalletTransactionsEnums() {
+        try {
+            jdbcTemplate.execute("ALTER TABLE wallet_transactions MODIFY COLUMN reason VARCHAR(255)");
+            jdbcTemplate.execute("ALTER TABLE wallet_transactions MODIFY COLUMN type VARCHAR(255)");
+            jdbcTemplate.execute("ALTER TABLE wallet_transactions MODIFY COLUMN reference_type VARCHAR(255)");
+            jdbcTemplate.execute("ALTER TABLE wallet_transactions MODIFY COLUMN status VARCHAR(255)");
+            log.info("Migration: 'wallet_transactions' enum columns are now VARCHAR(255) to prevent truncation errors.");
+        } catch (Exception e) {
+            log.error("Failed to alter wallet_transactions columns: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Migration 4: Fix stale 'user_id' NOT NULL column in wallet_transactions.
+     * The WalletTransaction entity only uses wallet_id, not user_id.
+     * This orphan NOT NULL column causes: "Field 'user_id' doesn't have a default value".
+     *
+     * Fix: Make it nullable so inserts succeed without providing user_id.
+     * Column is kept (not dropped) for production safety.
+     */
+    private void migrateWalletTransactionsDropUserId() {
+        try {
+            jdbcTemplate.execute(
+                "ALTER TABLE wallet_transactions MODIFY COLUMN user_id BIGINT NULL DEFAULT NULL"
+            );
+            log.info("Migration: wallet_transactions.user_id is now nullable.");
+        } catch (Exception e) {
+            // Column may not exist — safe to ignore
+            log.debug("wallet_transactions.user_id migration skipped: {}", e.getMessage());
         }
     }
 }

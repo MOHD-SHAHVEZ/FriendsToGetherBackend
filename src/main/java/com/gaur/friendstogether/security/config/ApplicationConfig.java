@@ -24,7 +24,7 @@ public class ApplicationConfig {
             return org.springframework.security.core.userdetails.User
                     .withUsername(user.getEmail()) // Username as Email
                     .password(user.getPassword() != null ? user.getPassword() : "")
-                    .authorities("USER")
+                    .authorities("ROLE_" + user.getRole().name())
                     .disabled(!user.isEnabled())
                     .build();
         };

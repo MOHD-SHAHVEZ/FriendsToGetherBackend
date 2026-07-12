@@ -55,7 +55,7 @@ public class UserProfile {
     // ==========================================
     // RELATION: User table se link karne ke liye
     // ==========================================
-    @com.fasterxml.jackson.annotation.JsonBackReference
+    @com.fasterxml.jackson.annotation.JsonBackReference("user-profile")
     @OneToOne
     @JoinColumn(name = "user_id", referencedColumnName = "id")
     private User user;

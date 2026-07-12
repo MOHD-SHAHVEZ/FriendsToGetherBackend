@@ -59,9 +59,23 @@ public class User {
         }
     }
 
+    // ==========================================
+    // User Role (ADMIN / USER)
+    // ==========================================
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    @Column(nullable = false)
+    private UserRole role = UserRole.USER;
+
     // RELATION: One-to-One with UserProfile
     // mappedBy ka matlab hai ki relation ki asli malik 'UserProfile' table hai
-    @com.fasterxml.jackson.annotation.JsonManagedReference
+    @com.fasterxml.jackson.annotation.JsonManagedReference("user-profile")
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private UserProfile profile;
+
+    // RELATION: One-to-One with UserWallet
+    // Har user ka sirf ek wallet hota hai — registration ke waqt auto-create hota hai
+    @com.fasterxml.jackson.annotation.JsonManagedReference("user-wallet")
+    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private UserWallet wallet;
 }

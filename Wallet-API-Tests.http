@@ -1,0 +1,423 @@
+###############################################################################
+#                                                                             #
+#              WALLET DASHBOARD — COMPLETE API TEST FILE                      #
+#              FriendsTogether Backend                                        #
+#                                                                             #
+#  HOW TO USE:                                                                #
+#  1. IntelliJ IDEA: File > Open > Select this file                          #
+#     Click the green ▶ play button next to any request                       #
+#                                                                             #
+#  2. VS Code: Install "REST Client" extension by Huachao Mao                #
+#     Click "Send Request" above any request                                  #
+#                                                                             #
+#  IMPORTANT:                                                                 #
+#  - First run STEP 1 (Login) to get your access token                        #
+#  - Copy the accessToken from the response                                   #
+#  - Replace {{token}} with your actual token in all other requests           #
+#                                                                             #
+#  BASE URL: http://localhost:8080                                            #
+#                                                                             #
+###############################################################################
+
+
+###############################################################################
+# VARIABLES
+###############################################################################
+@baseUrl = http://localhost:8080
+@token = PASTE_YOUR_ACCESS_TOKEN_HERE
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗      ██╗                                #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ███║                                #
+#    ███████╗   ██║   █████╗  ██████╔╝    ╚██║                                #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝      ██║                                #
+#    ███████║   ██║   ███████╗██║           ██║                                #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝           ╚═╝                                #
+#                                                                             #
+#    LOGIN — Get Access Token                                                 #
+#                                                                             #
+###############################################################################
+
+
+### ─────────────────────────────────────────────────────────────────
+### 1. LOGIN (Run this FIRST to get your JWT token)
+### ─────────────────────────────────────────────────────────────────
+### 
+### INPUT:
+###   email    → Your registered email
+###   password → Your password
+### 
+### EXPECTED RESPONSE (200 OK):
+### {
+###   "accessToken": "eyJhbGciOiJIUzI1NiJ9.xxxxx.yyyyy",
+###   "tokenType": "Bearer",
+###   "username": "your_username",
+###   "expiresIn": 86400
+### }
+### 
+### ACTION: Copy the accessToken value and replace {{token}} above
+### ─────────────────────────────────────────────────────────────────
+
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "your_email@example.com",
+  "password": "your_password"
+}
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗     ██████╗                             #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ╚════██╗                            #
+#    ███████╗   ██║   █████╗  ██████╔╝     █████╔╝                            #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝     ██╔═══╝                             #
+#    ███████║   ██║   ███████╗██║          ███████╗                            #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝          ╚══════╝                            #
+#                                                                             #
+#    WALLET BALANCE — Current Coins                                           #
+#                                                                             #
+###############################################################################
+
+
+### ─────────────────────────────────────────────────────────────────
+### 2. GET WALLET BALANCE
+### ─────────────────────────────────────────────────────────────────
+### 
+### ENDPOINT:  GET /api/wallet/balance
+### AUTH:      Bearer Token (required)
+### 
+### WHAT IT DOES:
+###   Reads user_wallets table → returns current coin balance.
+###   Single row, O(1) lookup on unique index.
+### 
+### EXPECTED RESPONSE (200 OK):
+### {
+###   "success": true,
+###   "message": "Wallet balance fetched successfully",
+###   "data": {
+###     "coins": 247,
+###     "status": "ACTIVE",
+###     "lifetimeRechargedCoins": 0,
+###     "lastTransactionAt": "2026-07-09T14:46:00"
+###   },
+###   "timestamp": 1720520760000
+### }
+### 
+### POSSIBLE ERRORS:
+###   401 → Token missing or expired
+###   404 → Wallet not found for user
+###   403 → Wallet is FROZEN / BLOCKED / CLOSED
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/balance
+Authorization: Bearer {{token}}
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗     ██████╗                             #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ╚════██╗                            #
+#    ███████╗   ██║   █████╗  ██████╔╝     █████╔╝                            #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝      ╚═══██╗                            #
+#    ███████║   ██║   ███████╗██║          ██████╔╝                            #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝          ╚═════╝                            #
+#                                                                             #
+#    WALLET SUMMARY — Dashboard Composite                                     #
+#                                                                             #
+###############################################################################
+
+
+### ─────────────────────────────────────────────────────────────────
+### 3. GET WALLET SUMMARY (Dashboard Composite)
+### ─────────────────────────────────────────────────────────────────
+### 
+### ENDPOINT:  GET /api/wallet/summary
+### AUTH:      Bearer Token (required)
+### 
+### WHAT IT DOES:
+###   Returns balance + last 5 recent transactions in ONE call.
+###   Frontend ko 2 alag API calls nahi karni padti.
+### 
+###   Queries:
+###   1. user_wallets → currentBalance
+###   2. wallet_transactions → top 5 recent
+### 
+### EXPECTED RESPONSE (200 OK):
+### {
+###   "success": true,
+###   "message": "Wallet summary fetched successfully",
+###   "data": {
+###     "balance": {
+###       "coins": 247,
+###       "status": "ACTIVE",
+###       "lifetimeRechargedCoins": 0,
+###       "lastTransactionAt": "2026-07-09T14:46:00"
+###     },
+###     "recentTransactions": [
+###       {
+###         "transactionNumber": "TXN-SEED-1-12345678",
+###         "amount": 247,
+###         "type": "CREDIT",
+###         "reason": "WELCOME_BONUS",
+###         "description": "Welcome bonus - 247 coins credited",
+###         "balanceAfter": 247,
+###         "createdAt": "2026-07-09T14:46:00"
+###       }
+###     ]
+###   },
+###   "timestamp": 1720520760000
+### }
+### 
+### POSSIBLE ERRORS:
+###   401 → Token missing or expired
+###   404 → Wallet not found for user
+###   403 → Wallet is FROZEN / BLOCKED / CLOSED
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/summary
+Authorization: Bearer {{token}}
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗     ██╗  ██╗                            #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ██║  ██║                            #
+#    ███████╗   ██║   █████╗  ██████╔╝    ███████║                            #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝     ╚════██║                            #
+#    ███████║   ██║   ███████╗██║               ██║                            #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝               ╚═╝                            #
+#                                                                             #
+#    TRANSACTION HISTORY — Paginated                                          #
+#                                                                             #
+###############################################################################
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4a. GET TRANSACTION HISTORY — Default (Page 0, Size 20)
+### ─────────────────────────────────────────────────────────────────
+### 
+### ENDPOINT:  GET /api/wallet/transactions
+### AUTH:      Bearer Token (required)
+### PARAMS:    page (default 0), size (default 20, max 50), type (optional)
+### 
+### WHAT IT DOES:
+###   Returns paginated wallet transaction history.
+###   Latest transactions first (ORDER BY created_at DESC).
+### 
+### EXPECTED RESPONSE (200 OK):
+### {
+###   "success": true,
+###   "message": "Transaction history fetched successfully",
+###   "data": {
+###     "content": [
+###       {
+###         "transactionNumber": "TXN-SEED-1-12345678",
+###         "amount": 247,
+###         "type": "CREDIT",
+###         "reason": "WELCOME_BONUS",
+###         "description": "Welcome bonus - 247 coins credited",
+###         "balanceAfter": 247,
+###         "createdAt": "2026-07-09T14:46:00"
+###       }
+###     ],
+###     "pageable": { ... },
+###     "totalElements": 1,
+###     "totalPages": 1,
+###     "size": 20,
+###     "number": 0,
+###     "first": true,
+###     "last": true,
+###     "empty": false
+###   },
+###   "timestamp": 1720520760000
+### }
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions
+Authorization: Bearer {{token}}
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4b. GET TRANSACTION HISTORY — Custom Pagination
+### ─────────────────────────────────────────────────────────────────
+### 
+### Page 0, Size 5 — sirf 5 transactions per page
+### 
+### EXPECTED: Same structure as 4a, but with size=5
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?page=0&size=5
+Authorization: Bearer {{token}}
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4c. GET TRANSACTION HISTORY — Filter by CREDIT only
+### ─────────────────────────────────────────────────────────────────
+### 
+### Sirf CREDIT transactions (purchases, rewards, bonuses)
+### 
+### EXPECTED: Same paginated structure, but only type="CREDIT" entries
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?type=CREDIT
+Authorization: Bearer {{token}}
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4d. GET TRANSACTION HISTORY — Filter by DEBIT only
+### ─────────────────────────────────────────────────────────────────
+### 
+### Sirf DEBIT transactions (gifts sent, admin deductions)
+### 
+### EXPECTED: Same paginated structure, but only type="DEBIT" entries
+### NOTE: If no debits exist yet, content will be empty array []
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?type=DEBIT
+Authorization: Bearer {{token}}
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4e. GET TRANSACTION HISTORY — Page 2
+### ─────────────────────────────────────────────────────────────────
+### 
+### Second page of transactions
+### NOTE: If total transactions < 20, this will return empty content
+### 
+### EXPECTED: "number": 1 (0-indexed), "first": false
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?page=1&size=10
+Authorization: Bearer {{token}}
+
+
+### ─────────────────────────────────────────────────────────────────
+### 4f. GET TRANSACTION HISTORY — Max Size (50)
+### ─────────────────────────────────────────────────────────────────
+### 
+### Size > 50 automatically capped to 50 by controller
+### This tests that size=100 actually returns max 50
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?page=0&size=100
+Authorization: Bearer {{token}}
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗     ███████╗                            #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ██╔════╝                            #
+#    ███████╗   ██║   █████╗  ██████╔╝    ███████╗                            #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝     ╚════██║                            #
+#    ███████║   ██║   ███████╗██║          ███████║                            #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝          ╚══════╝                            #
+#                                                                             #
+#    ERROR SCENARIOS — Negative Test Cases                                    #
+#                                                                             #
+###############################################################################
+
+
+### ─────────────────────────────────────────────────────────────────
+### 5a. NO TOKEN — Unauthorized (401)
+### ─────────────────────────────────────────────────────────────────
+### 
+### No Authorization header sent.
+### 
+### EXPECTED RESPONSE (401 Unauthorized):
+### {
+###   "success": false,
+###   "message": "Authentication failed: Full authentication is required"
+### }
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/balance
+
+
+### ─────────────────────────────────────────────────────────────────
+### 5b. INVALID TOKEN — Unauthorized (401)
+### ─────────────────────────────────────────────────────────────────
+### 
+### Expired or malformed JWT token.
+### 
+### EXPECTED RESPONSE (401 Unauthorized):
+### {
+###   "success": false,
+###   "message": "Authentication failed: JWT token is invalid"
+### }
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/balance
+Authorization: Bearer invalid_token_here_abc123
+
+
+### ─────────────────────────────────────────────────────────────────
+### 5c. INVALID TRANSACTION TYPE — Bad Request (400)
+### ─────────────────────────────────────────────────────────────────
+### 
+### Sending an invalid type parameter.
+### 
+### EXPECTED RESPONSE (400 Bad Request):
+### {
+###   "success": false,
+###   "message": "Logic Error: Failed to convert value..."
+### }
+### ─────────────────────────────────────────────────────────────────
+
+GET {{baseUrl}}/api/wallet/transactions?type=INVALID_TYPE
+Authorization: Bearer {{token}}
+
+
+
+###############################################################################
+#                                                                             #
+#    ███████╗████████╗███████╗██████╗      ██████╗                            #
+#    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗    ██╔════╝                            #
+#    ███████╗   ██║   █████╗  ██████╔╝    ███████╗                            #
+#    ╚════██║   ██║   ██╔══╝  ██╔═══╝     ██╔═══██╗                           #
+#    ███████║   ██║   ███████╗██║          ╚██████╔╝                           #
+#    ╚══════╝   ╚═╝   ╚══════╝╚═╝           ╚═════╝                           #
+#                                                                             #
+#    QUICK REFERENCE — All Wallet APIs                                        #
+#                                                                             #
+###############################################################################
+#
+# ┌──────┬──────────────────────────────────┬──────────────────────────────┐
+# │ #    │ Endpoint                         │ Purpose                      │
+# ├──────┼──────────────────────────────────┼──────────────────────────────┤
+# │ 2    │ GET /api/wallet/balance           │ Current coin balance         │
+# │ 3    │ GET /api/wallet/summary           │ Balance + last 5 txns        │
+# │ 4a   │ GET /api/wallet/transactions      │ All txns (page 0, size 20)   │
+# │ 4b   │ GET /api/wallet/transactions      │ Custom pagination            │
+# │      │   ?page=0&size=5                  │                              │
+# │ 4c   │ GET /api/wallet/transactions      │ Only CREDIT transactions     │
+# │      │   ?type=CREDIT                    │                              │
+# │ 4d   │ GET /api/wallet/transactions      │ Only DEBIT transactions      │
+# │      │   ?type=DEBIT                     │                              │
+# │ 4e   │ GET /api/wallet/transactions      │ Second page                  │
+# │      │   ?page=1&size=10                 │                              │
+# │ 4f   │ GET /api/wallet/transactions      │ Max page size test (cap 50)  │
+# │      │   ?page=0&size=100                │                              │
+# ├──────┼──────────────────────────────────┼──────────────────────────────┤
+# │ 5a   │ GET /api/wallet/balance           │ No token → 401               │
+# │ 5b   │ GET /api/wallet/balance           │ Invalid token → 401          │
+# │ 5c   │ GET /api/wallet/transactions      │ Invalid type → 400           │
+# │      │   ?type=INVALID                   │                              │
+# └──────┴──────────────────────────────────┴──────────────────────────────┘
+#
+# TESTING ORDER:
+# 1 → Login and copy token
+# 2 → Test balance (main dashboard API)
+# 3 → Test summary (dashboard composite)
+# 4a-4f → Test all transaction history variations
+# 5a-5c → Test error scenarios
+#
+###############################################################################

@@ -22,6 +22,7 @@ public class UserCreationService {
 
     private final UserRepository userRepository;
     private final UniqueIdGenerator idGenerator;
+    private final WalletCreationService walletCreationService;
 
     @Transactional
     public User createLocalUser(String username, String email, String encodedPassword, String otp) {
@@ -42,7 +43,16 @@ public class UserCreationService {
                 .build();
         user.setProfile(profile);
 
-        return userRepository.save(user);
+        // Auto-create wallet with welcome bonus (cascaded via @OneToOne)
+        walletCreationService.createWalletForUser(user);
+
+        User savedUser = userRepository.save(user);
+
+        // Create welcome bonus transaction record (needs wallet ID)
+        walletCreationService.createWelcomeBonusTransaction(savedUser.getWallet());
+        logger.info("[USER-CREATE] Local user created with wallet: email={}", email);
+
+        return savedUser;
     }
 
     @Transactional
@@ -83,10 +93,17 @@ public class UserCreationService {
                 .build();
         user.setProfile(profile);
 
+        // Auto-create wallet with welcome bonus (cascaded via @OneToOne)
+        walletCreationService.createWalletForUser(user);
+
         logger.info("[OAUTH-CREATE] Calling userRepository.saveAndFlush() — forcing immediate SQL INSERT...");
         User savedUser = userRepository.saveAndFlush(user);
         logger.info("[OAUTH-CREATE] saveAndFlush() COMPLETED — DB id: {}, email: {}, authProvider: {}", 
                 savedUser.getId(), savedUser.getEmail(), savedUser.getAuthProvider());
+
+        // Create welcome bonus transaction record (needs wallet ID)
+        walletCreationService.createWelcomeBonusTransaction(savedUser.getWallet());
+        logger.info("[OAUTH-CREATE] Wallet created with welcome bonus for: {}", savedUser.getEmail());
         logger.info("[OAUTH-CREATE] ===== createOAuthUser() EXITING SUCCESSFULLY =====");
 
         return savedUser;

@@ -60,6 +60,43 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
     }
 
+    // =========================================================================
+    // WALLET EXCEPTIONS
+    // =========================================================================
+
+    // Wallet not found for user (404)
+    @ExceptionHandler(WalletNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleWalletNotFound(WalletNotFoundException ex) {
+        logger.warn("[WALLET] Wallet not found: {}", ex.getMessage());
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(false)
+                .message(ex.getMessage())
+                .build();
+        return new ResponseEntity<>(response, HttpStatus.NOT_FOUND);
+    }
+
+    // Wallet is FROZEN / BLOCKED / CLOSED (403)
+    @ExceptionHandler(WalletInactiveException.class)
+    public ResponseEntity<ApiResponse<Void>> handleWalletInactive(WalletInactiveException ex) {
+        logger.warn("[WALLET] Wallet inactive: {}", ex.getMessage());
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(false)
+                .message(ex.getMessage())
+                .build();
+        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
+    }
+
+    // Insufficient coins for debit (400)
+    @ExceptionHandler(InsufficientBalanceException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInsufficientBalance(InsufficientBalanceException ex) {
+        logger.warn("[WALLET] Insufficient balance: {}", ex.getMessage());
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(false)
+                .message(ex.getMessage())
+                .build();
+        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+    }
+
     // 5. Koi bhi anjaan Runtime error ke liye
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiResponse<Void>> handleRuntime(RuntimeException ex) {
