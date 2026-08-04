@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Razorpay Test Frontend</title>
+    <!-- Razorpay SDK -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        h2 { color: #333; text-align: center; margin-top: 0; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; color: #555; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background-color: #3399cc; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.3s; }
+        button:hover { background-color: #287a2; }
+        button:disabled { background-color: #999; cursor: not-allowed; }
+        .log-box { margin-top: 20px; padding: 10px; background: #eef; border-radius: 6px; font-size: 12px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; color: #333;}
+        .success { color: #2ecc71; font-weight: bold; text-align: center; margin-top: 15px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🪙 Buy Coins</h2>
+    
+    <div class="form-group">
+        <label for="jwtToken">Your JWT Token (Bearer)</label>
+        <input type="text" id="jwtToken" placeholder="Paste your eyJ... token here">
+    </div>
+
+    <div class="form-group">
+        <label for="planId">Coin Plan ID (e.g., 1)</label>
+        <input type="number" id="planId" value="1">
+    </div>
+
+    <button id="buyBtn" onclick="startPaymentFlow()">Pay with Razorpay</button>
+
+    <div id="successMsg" class="success">🎉 Payment Successful! Coins Added!</div>
+    
+    <div class="log-box" id="logBox">Logs will appear here...</div>
+</div>
+
+<script>
+    // Generate a random UUID for idempotency
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function log(message) {
+        const logBox = document.getElementById('logBox');
+        logBox.innerHTML += `\n[${new Date().toLocaleTimeString()}] ${message}`;
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function startPaymentFlow() {
+        const token = document.getElementById('jwtToken').value.trim();
+        const planId = document.getElementById('planId').value;
+        const btn = document.getElementById('buyBtn');
+
+        if (!token) {
+            alert("Please paste your JWT token first!");
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerText = "Processing...";
+        document.getElementById('successMsg').style.display = 'none';
+        document.getElementById('logBox').innerHTML = "Starting process...";
+
+        try {
+            // STEP 1: CREATE ORDER
+            const orderKey = generateUUID();
+            log(`Calling /api/orders (Key: ${orderKey})`);
+            const orderRes = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ planId: planId, idempotencyKey: orderKey })
+            });
+            const orderData = await orderRes.json();
+            if (!orderRes.ok) throw new Error(orderData.message || "Order creation failed");
+            
+            const orderNumber = orderData.data.orderNumber;
+            log(`Order Created: ${orderNumber}`);
+
+            // STEP 2: INITIATE PAYMENT (Backend creates Razorpay Order)
+            const paymentKey = generateUUID();
+            log(`Calling /api/payments/initiate (Key: ${paymentKey})`);
+            const initiateRes = await fetch('/api/payments/initiate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ orderNumber: orderNumber, idempotencyKey: paymentKey })
+            });
+            const paymentData = await initiateRes.json();
+            if (!initiateRes.ok) throw new Error(paymentData.message || "Payment initiation failed");
+
+            const rzpOrderId = paymentData.data.razorpayOrderId;
+            const amount = paymentData.data.amount;
+            const keyId = paymentData.data.keyId;
+            log(`Razorpay Order ID Received: ${rzpOrderId}`);
+
+            // STEP 3: OPEN RAZORPAY CHECKOUT POPUP
+            log("Opening Razorpay Popup...");
+            const options = {
+                key: keyId,
+                amount: amount * 100, // Amount in paise
+                currency: "INR",
+                name: "FriendsTogether",
+                description: "Purchase Coins",
+                order_id: rzpOrderId,
+                handler: async function (response) {
+                    log("Razorpay Success! Signature received.");
+                    await verifyPayment(response.razorpay_order_id, response.razorpay_payment_id, response.razorpay_signature, token);
+                },
+                theme: { color: "#3399cc" }
+            };
+
+            const rzp = new window.Razorpay(options);
+            rzp.on('payment.failed', function (response){
+                log(`Payment Failed: ${response.error.description}`);
+                btn.disabled = false;
+                btn.innerText = "Pay with Razorpay";
+            });
+            rzp.open();
+
+        } catch (error) {
+            log(`ERROR: ${error.message}`);
+            btn.disabled = false;
+            btn.innerText = "Pay with Razorpay";
+        }
+    }
+
+    async function verifyPayment(rzpOrderId, rzpPaymentId, signature, token) {
+        log("Calling /api/payments/verify...");
+        try {
+            const verifyRes = await fetch('/api/payments/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    razorpayOrderId: rzpOrderId,
+                    razorpayPaymentId: rzpPaymentId,
+                    razorpaySignature: signature
+                })
+            });
+            
+            const verifyData = await verifyRes.json();
+            
+            if (verifyRes.ok) {
+                log("Backend Verification Success!");
+                document.getElementById('successMsg').style.display = 'block';
+                document.getElementById('buyBtn').innerText = "Coins Added! 🪙";
+            } else {
+                log(`Backend Verification Failed: ${verifyData.message}`);
+                document.getElementById('buyBtn').disabled = false;
+                document.getElementById('buyBtn').innerText = "Pay with Razorpay";
+            }
+        } catch (error) {
+            log(`VERIFY ERROR: ${error.message}`);
+        }
+    }
+</script>
+
+</body>
+</html>

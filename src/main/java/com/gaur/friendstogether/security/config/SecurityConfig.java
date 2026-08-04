@@ -33,6 +33,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable) // Stateless API — CSRF not needed for Bearer tokens
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/payments/webhook").permitAll() // Webhook ko publicly accessible rakhna zaruri hai
                         .requestMatchers("/ws/**").permitAll() // --- WebSocket endpoint ko khula chhodo ---
                         .requestMatchers("/favicon.ico", "/error").permitAll()
                         .anyRequest().authenticated()

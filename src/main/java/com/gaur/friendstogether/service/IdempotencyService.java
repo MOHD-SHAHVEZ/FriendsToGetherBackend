@@ -241,6 +241,7 @@ public class IdempotencyService {
         idempotencyRecordRepository.findByIdempotencyKey(idempotencyKey)
                 .ifPresent(record -> {
                     record.setStatus(IdempotencyStatus.COMPLETED);
+                    record.setExpiresAt(LocalDateTime.now().plusMinutes(30));
                     idempotencyRecordRepository.save(record);
                 });
     }
