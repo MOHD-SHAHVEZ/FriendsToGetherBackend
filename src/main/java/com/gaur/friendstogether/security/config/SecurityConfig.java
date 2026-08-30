@@ -35,6 +35,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/payments/webhook").permitAll() // Webhook ko publicly accessible rakhna zaruri hai
                         .requestMatchers("/ws/**").permitAll() // --- WebSocket endpoint ko khula chhodo ---
+                        .requestMatchers("/actuator/**").permitAll() // Health checks for Render
                         .requestMatchers("/favicon.ico", "/error").permitAll()
                         .anyRequest().authenticated()
                 )
