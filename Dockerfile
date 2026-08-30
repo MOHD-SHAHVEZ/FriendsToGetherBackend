@@ -47,9 +47,6 @@ USER appuser
 # Expose the application port
 EXPOSE 8080
 
-# Health check for Render (hits Spring Actuator)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-8080}/actuator/health || exit 1
 
 # JVM tuning for containerized environments
 # - Uses container-aware memory settings
