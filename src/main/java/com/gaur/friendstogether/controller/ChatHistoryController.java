@@ -25,7 +25,8 @@ public class ChatHistoryController {
     @GetMapping("/history/{otherUserId}")
     public ResponseEntity<List<ChatMessageResponse>> getHistory(
             @PathVariable String otherUserId,
-            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
             Principal principal) {
 
         if (principal == null) {
@@ -34,7 +35,7 @@ public class ChatHistoryController {
         }
 
         String myEmail = principal.getName();
-        log.info("[CHAT-API] History request — user: {}, otherUserId: {}, limit: {}", myEmail, otherUserId, limit);
+        log.info("[CHAT-API] History request — user: {}, otherUserId: {}, page: {}, size: {}", myEmail, otherUserId, page, size);
 
         User myUser = userRepository.findByEmail(myEmail)
                 .orElseThrow(() -> {
@@ -42,7 +43,7 @@ public class ChatHistoryController {
                     return new RuntimeException("User not found: " + myEmail);
                 });
 
-        List<ChatMessageResponse> history = chatService.getChatHistory(myUser.getUserId(), otherUserId, limit);
+        List<ChatMessageResponse> history = chatService.getChatHistory(myUser.getUserId(), otherUserId, page, size);
         log.info("[CHAT-API] History returned — {} messages", history.size());
 
         return ResponseEntity.ok(history);

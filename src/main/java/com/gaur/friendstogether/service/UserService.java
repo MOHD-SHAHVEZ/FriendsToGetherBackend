@@ -3,6 +3,7 @@ package com.gaur.friendstogether.service;
 import com.gaur.friendstogether.dto.request.UpdateProfileRequest;
 import com.gaur.friendstogether.dto.response.UserProfileResponse;
 import com.gaur.friendstogether.entity.User;
+import com.gaur.friendstogether.entity.UserProfile;
 import com.gaur.friendstogether.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -20,16 +21,24 @@ public class UserService {
     // YE LINE MISSING THI - FileService ko yahan declare karna zaroori hai
     private final FileService fileService;
 
-    @Transactional(readOnly = true)
+    @Transactional
     public UserProfileResponse getMyProfile(String email) {
         logger.info("Fetching profile for user: {}", email);
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
 
+        // Self-healing: Agar profile missing hai toh auto-create kar do
         if (user.getProfile() == null) {
-            logger.error("Profile missing for verified user: {}", email);
-            throw new RuntimeException("User profile data is corrupted or missing.");
+            logger.warn("Profile missing for user: {}. Auto-creating profile...", email);
+            UserProfile profile = UserProfile.builder()
+                    .nickname(user.getUsername())
+                    .level(1)
+                    .user(user)
+                    .build();
+            user.setProfile(profile);
+            user = userRepository.save(user);
+            logger.info("Profile auto-created successfully for user: {}", email);
         }
 
         return UserProfileResponse.builder()

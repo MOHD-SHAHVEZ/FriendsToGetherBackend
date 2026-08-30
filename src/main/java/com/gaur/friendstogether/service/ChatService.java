@@ -132,8 +132,8 @@ public class ChatService {
     // CHAT HISTORY (FIXED FOR PINK/GREY BUG)
     // ====================================================================
     @Transactional(readOnly = true)
-    public List<ChatMessageResponse> getChatHistory(String userId1, String userId2, int limit) {
-        log.info("[CHAT-SVC] Fetching personal chat history between {} and {} (limit: {})", userId1, userId2, limit);
+    public List<ChatMessageResponse> getChatHistory(String userId1, String userId2, int page, int size) {
+        log.info("[CHAT-SVC] Fetching history for {} and {} (page: {}, size: {})", userId1, userId2, page, size);
 
         /* OLD BUGGY LOGIC (Commented out for reference):
         // This was fetching oldest messages instead of newest
@@ -156,7 +156,7 @@ public class ChatService {
         String roomId = ChatUtils.generateRoomId(userId1, userId2);
         
         // 2. Fetch NEWEST messages first (DESC) using Pageable
-        Pageable pageable = PageRequest.of(0, limit);
+        Pageable pageable = PageRequest.of(page, size);
         List<ChatMessage> messages = chatMessageRepository.findByRoomIdOrderByTimestampDesc(roomId, pageable);
 
         // 3. Process and filter

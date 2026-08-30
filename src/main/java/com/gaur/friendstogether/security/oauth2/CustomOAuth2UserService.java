@@ -83,6 +83,19 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             }
 
             logger.info("[OAUTH] Existing OAuth user validated successfully for email: {}", email);
+
+            // Self-healing: Agar existing OAuth user ka profile kisi wajah se missing hai, toh create kar do
+            if (user.getProfile() == null) {
+                logger.warn("[OAUTH] Profile MISSING for existing OAuth user: {}. Auto-creating...", email);
+                com.gaur.friendstogether.entity.UserProfile profile = com.gaur.friendstogether.entity.UserProfile.builder()
+                        .nickname(oAuth2UserInfo.getName() != null ? oAuth2UserInfo.getName() : user.getUsername())
+                        .level(1)
+                        .user(user)
+                        .build();
+                user.setProfile(profile);
+                userRepository.saveAndFlush(user);
+                logger.info("[OAUTH] Profile auto-created for existing OAuth user: {}", email);
+            }
         } else {
             // New OAuth User
             logger.info("[OAUTH] ===== NEW OAUTH USER — entering creation branch =====");

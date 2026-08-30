@@ -72,10 +72,10 @@ public class DummyWalletDataSeeder implements CommandLineRunner {
                 .findTop5ByWallet_IdOrderByCreatedAtDesc(wallet.getId()).isEmpty();
 
         if (!hasTransactions) {
-            log.info("[DUMMY-DATA-SEEDER] Seeding realistic transaction data for walletId={}...", wallet.getId());
-            seedPurchaseFlows(primaryUser, wallet, plans);
-            seedGiftTransactions(primaryUser, wallet);
-            seedMiscTransactions(primaryUser, wallet);
+            // log.info("[DUMMY-DATA-SEEDER] Seeding realistic transaction data for walletId={}...", wallet.getId());
+            // seedPurchaseFlows(primaryUser, wallet, plans);
+            // seedGiftTransactions(primaryUser, wallet);
+            // seedMiscTransactions(primaryUser, wallet);
 
             // Update final wallet balance
             userWalletRepository.save(wallet);

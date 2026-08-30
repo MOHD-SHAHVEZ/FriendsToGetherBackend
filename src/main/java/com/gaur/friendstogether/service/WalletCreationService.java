@@ -37,7 +37,7 @@ public class WalletCreationService {
     /**
      * Welcome bonus amount — har naye user ko itne coins milte hain.
      */
-    private static final long WELCOME_BONUS_COINS = 247L;
+    private static final long WELCOME_BONUS_COINS = 50L;
 
     private final UserWalletRepository userWalletRepository;
     private final WalletTransactionRepository walletTransactionRepository;

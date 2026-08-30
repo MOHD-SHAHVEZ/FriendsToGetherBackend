@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.handler.annotation.MessageExceptionHandler;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
@@ -17,6 +19,7 @@ import java.security.Principal;
 public class ChatController {
 
     private final ChatService chatService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @MessageMapping("/chat.sendMessage") // Full path: /app/chat.sendMessage
     public void processMessage(@Payload ChatRequest chatRequest, Principal principal) {
@@ -35,5 +38,14 @@ public class ChatController {
         // Delegate to service — all business logic lives there
         ChatMessageResponse savedMsg = chatService.saveMessage(chatRequest, senderEmail);
         log.info("[CHAT-CTRL] Message processed — id: {}, status: {}", savedMsg.getId(), savedMsg.getStatus());
+    }
+
+    @MessageExceptionHandler
+    public void handleException(Exception ex, Principal principal) {
+        log.error("[CHAT-CTRL] Error processing message: {}", ex.getMessage(), ex);
+        if (principal != null) {
+            // Send the error message back to the sender
+            messagingTemplate.convertAndSendToUser(principal.getName(), "/queue/errors", ex.getMessage());
+        }
     }
 }
